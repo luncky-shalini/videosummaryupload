@@ -85,6 +85,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [playbackRateOpen, setPlaybackRateOpen] = useState(false);
 
+  // Extract YouTube ID if video is imported from YouTube
+  const youtubeId = useMemo(() => {
+    if (!sourceUrl) return null;
+    const match = sourceUrl.match(
+      /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/|youtube\.com\/shorts\/)([^"&?\/\s]{11})/i
+    );
+    return match ? match[1] : null;
+  }, [sourceUrl]);
+  const [useYouTubeEmbed, setUseYouTubeEmbed] = useState(false);
+
   // Map detected original language code to name
   const { originalLanguageName, originalLanguageCode } = useMemo(() => {
     const code = (detectedLanguage || 'en').toLowerCase().split('-')[0].split('_')[0];
@@ -97,19 +107,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     };
   }, [detectedLanguage]);
 
-  // Seed original subtitle track on mount or when initialSegments change
+  // Seed original subtitle track on mount or when initialSegments / videoId change
   useEffect(() => {
+    // Reset tracks when switching to a different video project
+    const newTracks: Record<string, TranscriptSegment[]> = {};
     if (initialSegments && initialSegments.length > 0) {
-      setSubtitleTracks((prev) => ({
-        ...prev,
-        [originalLanguageName]: initialSegments,
-        [originalLanguageCode]: initialSegments,
-      }));
-      // Default to original language initially
-      setActiveLanguage(originalLanguageName);
-      setSelectedLanguage(originalLanguageName);
+      newTracks[originalLanguageName] = initialSegments;
+      newTracks[originalLanguageCode] = initialSegments;
     }
-  }, [initialSegments, originalLanguageName, originalLanguageCode]);
+    setSubtitleTracks(newTracks);
+    // Default to original language initially
+    setActiveLanguage(originalLanguageName);
+    setSelectedLanguage(originalLanguageName);
+    setPlaybackError(null);
+    setTranslationMessage(null);
+    setUseYouTubeEmbed(false);
+  }, [videoId, initialSegments, originalLanguageName, originalLanguageCode]);
 
   // Jump to seek timestamp when requested by external components (transcript, moments)
   useEffect(() => {
@@ -320,17 +333,57 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.8rem', maxWidth: '380px' }}>
               {playbackError}
             </p>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'center', marginTop: '0.5rem' }}>
+              <button
+                onClick={() => {
+                  setPlaybackError(null);
+                  if (videoRef.current) {
+                    videoRef.current.load();
+                  }
+                }}
+                className="btn-secondary"
+                style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
+              >
+                <RefreshCw size={14} /> Retry Playback
+              </button>
+              {youtubeId && (
+                <button
+                  onClick={() => {
+                    setPlaybackError(null);
+                    setUseYouTubeEmbed(true);
+                  }}
+                  className="gradient-btn"
+                  style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
+                >
+                  <Play size={14} /> Play via YouTube
+                </button>
+              )}
+            </div>
+          </div>
+        ) : useYouTubeEmbed && youtubeId ? (
+          <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+            <iframe
+              src={`https://www.youtube-nocookie.com/embed/${youtubeId}?autoplay=1&enablejsapi=1`}
+              title={videoTitle || 'YouTube player'}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+              style={{ width: '100%', height: '100%', border: 'none' }}
+            />
             <button
-              onClick={() => {
-                setPlaybackError(null);
-                if (videoRef.current) {
-                  videoRef.current.load();
-                }
-              }}
+              onClick={() => setUseYouTubeEmbed(false)}
               className="btn-secondary"
-              style={{ marginTop: '0.5rem', padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
+              style={{
+                position: 'absolute',
+                top: '12px',
+                right: '12px',
+                zIndex: 20,
+                fontSize: '0.72rem',
+                padding: '0.3rem 0.6rem',
+                background: 'rgba(15, 23, 42, 0.85)',
+              }}
+              title="Switch back to synchronized native player"
             >
-              <RefreshCw size={14} /> Retry Playback
+              <RotateCcw size={12} /> Native Stream
             </button>
           </div>
         ) : (
