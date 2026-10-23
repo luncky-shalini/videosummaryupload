@@ -1,0 +1,46 @@
+# Python
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+uploads/
+backend/uploads/
+temp_media/
+*.db
+*.sqlite3
+
+# Node / Vite
+node_modules/
+dist/
+dist-ssr/
+frontend/dist/
+frontend/node_modules/
+.npm
+*.tsbuildinfo
+
+# Vercel
+.vercel/
+
+# Environment variables & Secrets (NEVER COMMIT SENSITIVE KEYS)
+.env
+.env.*
+!.env.example
+!frontend/.env.example
+!backend/.env.example
+*.env
+backend/.env
+frontend/.env
+supabase/.env
+*.pem
+*.key
+
+# Editor & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
