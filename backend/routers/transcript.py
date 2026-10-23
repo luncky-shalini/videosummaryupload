@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple, Optional
 from dependencies import get_current_user
 from database import get_supabase_admin
 from models.schemas import SpeakerRenameRequest, TranscriptSegmentBase
@@ -69,7 +69,59 @@ async def rename_speaker(
         "new_display_name": body.new_display_name
     }
 
-# Cache for translated subtitle tracks per video: {f"{video_id}_{target_lang.lower()}": segments}
+# Registry of supported subtitle languages: alias/code -> (canonical_code, English Name)
+LANGUAGE_REGISTRY: Dict[str, Tuple[str, str]] = {
+    "en": ("en", "English"),
+    "english": ("en", "English"),
+    "te": ("te", "Telugu"),
+    "telugu": ("te", "Telugu"),
+    "hi": ("hi", "Hindi"),
+    "hindi": ("hi", "Hindi"),
+    "es": ("es", "Spanish"),
+    "spanish": ("es", "Spanish"),
+    "español": ("es", "Spanish"),
+    "zh": ("zh", "Chinese"),
+    "chinese": ("zh", "Chinese"),
+    "mandarin": ("zh", "Chinese"),
+    "it": ("it", "Italian"),
+    "italian": ("it", "Italian"),
+    "italiano": ("it", "Italian"),
+    "bn": ("bn", "Bengali"),
+    "bengali": ("bn", "Bengali"),
+    "bangla": ("bn", "Bengali"),
+    "fr": ("fr", "French"),
+    "french": ("fr", "French"),
+    "français": ("fr", "French"),
+    "de": ("de", "German"),
+    "german": ("de", "German"),
+    "deutsch": ("de", "German"),
+    "ja": ("ja", "Japanese"),
+    "japanese": ("ja", "Japanese"),
+    "pt": ("pt", "Portuguese"),
+    "portuguese": ("pt", "Portuguese"),
+    "português": ("pt", "Portuguese"),
+    "ru": ("ru", "Russian"),
+    "russian": ("ru", "Russian"),
+    "ar": ("ar", "Arabic"),
+    "arabic": ("ar", "Arabic"),
+}
+
+def normalize_language(lang_input: Optional[str]) -> Tuple[str, str]:
+    """
+    Normalizes language name or ISO code to (2-letter-code, Canonical English Name).
+    e.g. 'te' -> ('te', 'Telugu'), 'Telugu' -> ('te', 'Telugu'), 'Hindi' -> ('hi', 'Hindi')
+    """
+    if not lang_input:
+        return "en", "English"
+    cleaned = str(lang_input).strip().lower()
+    base = cleaned.split("-")[0].split("_")[0]
+    if base in LANGUAGE_REGISTRY:
+        return LANGUAGE_REGISTRY[base]
+    if cleaned in LANGUAGE_REGISTRY:
+        return LANGUAGE_REGISTRY[cleaned]
+    return base, lang_input.strip().capitalize()
+
+# Cache for translated subtitle tracks per video: {f"{video_id}_{canonical_code}": segments}
 SUBTITLE_CACHE: Dict[str, List[Dict[str, Any]]] = {}
 
 @router.post("/{video_id}/subtitles/translate")
@@ -80,10 +132,11 @@ async def translate_subtitles(
 ):
     """
     Translates transcript subtitle segments into requested target language.
-    Preserves exact timing, sequence order, and speaker labels.
+    Preserves exact timing, sequence order, speaker labels, and Unicode characters.
     Reuses cached or original tracks without redundant API calls.
     """
-    target_language = (body.get("target_language") or "English").strip()
+    target_raw = (body.get("target_language") or body.get("target_language_code") or "English").strip()
+    target_code, target_name = normalize_language(target_raw)
     supabase = get_supabase_admin()
 
     v_res = supabase.table("videos").select("id, user_id").eq("id", video_id).single().execute()
@@ -95,51 +148,32 @@ async def translate_subtitles(
         raise HTTPException(status_code=404, detail="Transcript not found")
 
     transcript_id = t_res.data["id"]
-    detected_lang = (t_res.data.get("language") or "en").lower()
+    detected_raw = t_res.data.get("language") or "en"
+    orig_code, orig_name = normalize_language(detected_raw)
 
     # Fetch original segments
     seg_res = supabase.table("transcript_segments").select("*").eq("transcript_id", transcript_id).order("sequence_order").execute()
     original_segments = seg_res.data or []
 
-    # Map language aliases to check if target is the source audio language
-    lang_map = {
-        "english": ["en", "english"],
-        "telugu": ["te", "telugu"],
-        "hindi": ["hi", "hindi"],
-        "spanish": ["es", "spanish", "español"],
-        "chinese": ["zh", "chinese", "mandarin", "中文"],
-        "italian": ["it", "italian", "italiano"],
-        "bengali": ["bn", "bengali", "bangla", "বাংলা"],
-        "french": ["fr", "french", "français"],
-        "german": ["de", "german", "deutsch"],
-        "japanese": ["ja", "japanese", "日本語"],
-        "portuguese": ["pt", "portuguese", "português"],
-        "russian": ["ru", "russian"],
-        "arabic": ["ar", "arabic"]
-    }
-
-    target_lower = target_language.lower()
-    is_original = False
-    for std_name, aliases in lang_map.items():
-        if any(a in target_lower for a in aliases) and any(a in detected_lang for a in aliases):
-            is_original = True
-            break
-    if target_lower in (detected_lang, "original"):
-        is_original = True
+    # Check if target matches detected original audio language
+    is_original = (target_code == orig_code) or (target_raw.lower() in ("original", "source"))
 
     if is_original:
         return {
             "video_id": video_id,
-            "target_language": target_language,
+            "target_language": orig_name,
+            "target_language_code": orig_code,
             "is_original": True,
+            "is_cached": True,
             "segments": original_segments
         }
 
-    cache_key = f"{video_id}_{target_lower}"
+    cache_key = f"{video_id}_{target_code}"
     if cache_key in SUBTITLE_CACHE:
         return {
             "video_id": video_id,
-            "target_language": target_language,
+            "target_language": target_name,
+            "target_language_code": target_code,
             "is_original": False,
             "is_cached": True,
             "segments": SUBTITLE_CACHE[cache_key]
@@ -147,13 +181,15 @@ async def translate_subtitles(
 
     from services.groq_summarizer import GroqSummarizer
     summarizer = GroqSummarizer()
-    translated_segments = summarizer.translate_segments(original_segments, target_language)
+    translated_segments = summarizer.translate_segments(original_segments, target_name)
     SUBTITLE_CACHE[cache_key] = translated_segments
 
     return {
         "video_id": video_id,
-        "target_language": target_language,
+        "target_language": target_name,
+        "target_language_code": target_code,
         "is_original": False,
+        "is_cached": False,
         "segments": translated_segments
     }
 

@@ -190,18 +190,32 @@ Respond with a JSON object:
                     items = parsed
                 for it in items:
                     if isinstance(it, dict) and "id" in it:
-                        translated_map[it["id"]] = it.get("translated_text", it.get("text", ""))
+                        text_val = it.get("translated_text") or it.get("text") or ""
+                        try:
+                            int_id = int(it["id"])
+                            translated_map[int_id] = text_val
+                        except (ValueError, TypeError):
+                            pass
+                        translated_map[str(it["id"])] = text_val
             except Exception as e:
                 # Fallback to original text for this chunk if translation encounters an error
                 for it in chunk:
+                    orig_text = it.get("text", "")
                     if it["id"] not in translated_map:
-                        translated_map[it["id"]] = it["text"]
+                        translated_map[it["id"]] = orig_text
+                        translated_map[str(it["id"])] = orig_text
 
         result = []
         for idx, s in enumerate(segments):
             new_seg = dict(s)
-            new_seg["text"] = translated_map.get(idx, s.get("text", ""))
+            translated_text = translated_map.get(idx) or translated_map.get(str(idx)) or s.get("text", "")
+            new_seg["text"] = translated_text
             new_seg["language"] = target_language
+            try:
+                new_seg["start_time"] = float(s.get("start_time", 0.0))
+                new_seg["end_time"] = float(s.get("end_time", 0.0))
+            except (ValueError, TypeError):
+                pass
             result.append(new_seg)
 
         return result

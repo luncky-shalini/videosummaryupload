@@ -72,8 +72,9 @@ async def export_pdf(
 
     # Use translated segments if requested and available in cache
     if lang:
-        from routers.transcript import SUBTITLE_CACHE
-        cache_key = f"{video_id}_{lang.strip().lower()}"
+        from routers.transcript import SUBTITLE_CACHE, normalize_language
+        canonical_code, _ = normalize_language(lang)
+        cache_key = f"{video_id}_{canonical_code}"
         if cache_key in SUBTITLE_CACHE:
             segments = SUBTITLE_CACHE[cache_key]
 
@@ -235,8 +236,9 @@ async def export_srt(
     segments = seg_res.data or []
 
     if lang:
-        from routers.transcript import SUBTITLE_CACHE
-        cache_key = f"{video_id}_{lang.strip().lower()}"
+        from routers.transcript import SUBTITLE_CACHE, normalize_language
+        canonical_code, _ = normalize_language(lang)
+        cache_key = f"{video_id}_{canonical_code}"
         if cache_key in SUBTITLE_CACHE:
             segments = SUBTITLE_CACHE[cache_key]
 
@@ -281,8 +283,9 @@ async def export_vtt(
     segments = seg_res.data or []
 
     if lang:
-        from routers.transcript import SUBTITLE_CACHE
-        cache_key = f"{video_id}_{lang.strip().lower()}"
+        from routers.transcript import SUBTITLE_CACHE, normalize_language
+        canonical_code, _ = normalize_language(lang)
+        cache_key = f"{video_id}_{canonical_code}"
         if cache_key in SUBTITLE_CACHE:
             segments = SUBTITLE_CACHE[cache_key]
 
