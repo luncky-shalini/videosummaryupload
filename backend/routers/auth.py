@@ -76,7 +76,7 @@ async def register_user(req: RegisterRequest):
 
     # If user already exists, update/link their password so they are never blocked
     try:
-        users = admin_supabase.auth.admin.list_users()
+        users = admin_supabase.auth.admin.list_users(page=1, per_page=1000)
         for u in users:
             if u.email and u.email.lower() == email:
                 full_name = (req.full_name or u.user_metadata.get("full_name") or email.split("@")[0]).strip()
@@ -168,7 +168,7 @@ async def check_auth_method(req: CheckEmailRequest):
     admin_supabase = get_supabase_admin()
 
     try:
-        users = admin_supabase.auth.admin.list_users()
+        users = admin_supabase.auth.admin.list_users(page=1, per_page=1000)
         for u in users:
             if u.email and u.email.lower() == email:
                 providers = u.app_metadata.get("providers", [])
@@ -200,7 +200,7 @@ async def confirm_account(req: ConfirmAccountRequest):
     admin_supabase = get_supabase_admin()
 
     try:
-        users = admin_supabase.auth.admin.list_users()
+        users = admin_supabase.auth.admin.list_users(page=1, per_page=1000)
         for u in users:
             if u.email and u.email.lower() == email:
                 if not u.email_confirmed_at:

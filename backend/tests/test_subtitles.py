@@ -24,8 +24,18 @@ def test_language_normalization():
     assert normalize_language("es") == ("es", "Spanish")
     assert normalize_language("español") == ("es", "Spanish")
 
-    assert normalize_language("Japanese") == ("ja", "Japanese")
-    assert normalize_language("ja") == ("ja", "Japanese")
+    assert normalize_language("Korean") == ("ko", "Korean")
+    assert normalize_language("ko") == ("ko", "Korean")
+    assert normalize_language("korean") == ("ko", "Korean")
+
+    assert normalize_language("Chinese") == ("zh", "Chinese")
+    assert normalize_language("zh") == ("zh", "Chinese")
+
+    assert normalize_language("Italian") == ("it", "Italian")
+    assert normalize_language("it") == ("it", "Italian")
+
+    assert normalize_language("Bengali") == ("bn", "Bengali")
+    assert normalize_language("bn") == ("bn", "Bengali")
 
 
 def test_no_false_substring_collisions():

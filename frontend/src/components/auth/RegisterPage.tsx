@@ -98,13 +98,9 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigateToLogin })
         setFormError(error.message || 'Failed to create account. Please try again.');
       } else {
         // Successful registration: Navigate directly to the Sign In page with email pre-filled
-        const isUnconfirmed = data?.user && !data?.user?.email_confirmed_at && !data?.session;
-        const confirmMsg = isUnconfirmed
-          ? `Account created successfully! Please check your email at ${email.trim()} to verify your account, then sign in.`
-          : 'Account created successfully! Please sign in with your credentials.';
-
-        setSuccessMessage(confirmMsg);
-        onNavigateToLogin(email.trim(), confirmMsg);
+        const successMsg = 'Account created successfully! Please sign in with your credentials.';
+        setSuccessMessage(successMsg);
+        onNavigateToLogin(email.trim(), successMsg);
       }
     } catch (err: any) {
       console.error('Registration error:', err);

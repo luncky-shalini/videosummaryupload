@@ -43,6 +43,7 @@ const SUPPORTED_LANGUAGES: LanguageOption[] = [
   { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी' },
   { code: 'es', name: 'Spanish', nativeName: 'Español' },
   { code: 'zh', name: 'Chinese', nativeName: '中文' },
+  { code: 'ko', name: 'Korean', nativeName: '한국어' },
   { code: 'it', name: 'Italian', nativeName: 'Italiano' },
   { code: 'bn', name: 'Bengali', nativeName: 'বাংলা' },
   { code: 'fr', name: 'French', nativeName: 'Français' },
@@ -51,6 +52,18 @@ const SUPPORTED_LANGUAGES: LanguageOption[] = [
   { code: 'pt', name: 'Portuguese', nativeName: 'Português' },
   { code: 'ru', name: 'Russian', nativeName: 'Русский' },
   { code: 'ar', name: 'Arabic', nativeName: 'العربية' },
+  { code: 'ta', name: 'Tamil', nativeName: 'தமிழ்' },
+  { code: 'kn', name: 'Kannada', nativeName: 'ಕನ್ನಡ' },
+  { code: 'ml', name: 'Malayalam', nativeName: 'മലയാളം' },
+  { code: 'mr', name: 'Marathi', nativeName: 'मराठी' },
+  { code: 'gu', name: 'Gujarati', nativeName: 'ગુજરાતી' },
+  { code: 'pa', name: 'Punjabi', nativeName: 'ਪੰਜਾਬੀ' },
+  { code: 'tr', name: 'Turkish', nativeName: 'Türkçe' },
+  { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt' },
+  { code: 'ur', name: 'Urdu', nativeName: 'اردو' },
+  { code: 'nl', name: 'Dutch', nativeName: 'Nederlands' },
+  { code: 'pl', name: 'Polish', nativeName: 'Polski' },
+  { code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia' },
 ];
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
@@ -67,6 +80,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const { session } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const requestIdRef = useRef(0);
 
   // Stream URL with auth token query param so browser native media engine authenticates cleanly
   const token = session?.access_token;
@@ -95,28 +110,59 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [sourceUrl]);
   const [useYouTubeEmbed, setUseYouTubeEmbed] = useState(false);
 
-  // Map detected original language code to name
+  // Map detected original language code to name, preserving detected language accurately
   const { originalLanguageName, originalLanguageCode } = useMemo(() => {
-    const code = (detectedLanguage || 'en').toLowerCase().split('-')[0].split('_')[0];
+    if (!detectedLanguage) {
+      return { originalLanguageName: 'English', originalLanguageCode: 'en' };
+    }
+    const raw = String(detectedLanguage).trim();
+    const clean = raw.toLowerCase().split('-')[0].split('_')[0];
     const found = SUPPORTED_LANGUAGES.find(
-      (l) => l.code === code || l.name.toLowerCase() === code
+      (l) =>
+        l.code === clean ||
+        l.name.toLowerCase() === clean ||
+        l.name.toLowerCase() === raw.toLowerCase()
     );
+    if (found) {
+      return {
+        originalLanguageName: found.name,
+        originalLanguageCode: found.code,
+      };
+    }
+    const capitalized = raw.charAt(0).toUpperCase() + raw.slice(1);
     return {
-      originalLanguageName: found ? found.name : 'English',
-      originalLanguageCode: found ? found.code : 'en',
+      originalLanguageName: capitalized,
+      originalLanguageCode: clean || 'source',
     };
   }, [detectedLanguage]);
 
+  // Dynamic dropdown options including original language if not present in standard list
+  const languageOptions = useMemo(() => {
+    const list = [...SUPPORTED_LANGUAGES];
+    const hasOriginal = list.some(
+      (l) =>
+        l.name.toLowerCase() === originalLanguageName.toLowerCase() ||
+        l.code === originalLanguageCode
+    );
+    if (!hasOriginal && originalLanguageName) {
+      list.unshift({
+        code: originalLanguageCode,
+        name: originalLanguageName,
+        nativeName: originalLanguageName,
+      });
+    }
+    return list;
+  }, [originalLanguageName, originalLanguageCode]);
+
   // Seed original subtitle track on mount or when initialSegments / videoId change
   useEffect(() => {
-    // Reset tracks when switching to a different video project
     const newTracks: Record<string, TranscriptSegment[]> = {};
     if (initialSegments && initialSegments.length > 0) {
       newTracks[originalLanguageName] = initialSegments;
       newTracks[originalLanguageCode] = initialSegments;
     }
     setSubtitleTracks(newTracks);
-    // Default to original language initially
+    // Default active track and selected language to the video's actual original language
     setActiveLanguage(originalLanguageName);
     setSelectedLanguage(originalLanguageName);
     setPlaybackError(null);
@@ -124,13 +170,60 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setUseYouTubeEmbed(false);
   }, [videoId, initialSegments, originalLanguageName, originalLanguageCode]);
 
+  // Synchronize playback time when embedded in YouTube iframe
+  useEffect(() => {
+    if (!useYouTubeEmbed || !youtubeId) return;
+
+    const handleMessage = (event: MessageEvent) => {
+      try {
+        if (typeof event.data === 'string') {
+          const parsed = JSON.parse(event.data);
+          if (parsed?.event === 'infoDelivery' && parsed?.info) {
+            if (typeof parsed.info.currentTime === 'number') {
+              onTimeUpdate(parsed.info.currentTime);
+            }
+          }
+        }
+      } catch {
+        // non-JSON message, safely ignore
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    const interval = setInterval(() => {
+      if (iframeRef.current?.contentWindow) {
+        iframeRef.current.contentWindow.postMessage(
+          JSON.stringify({ event: 'listening' }),
+          '*'
+        );
+        iframeRef.current.contentWindow.postMessage(
+          JSON.stringify({ event: 'command', func: 'getCurrentTime' }),
+          '*'
+        );
+      }
+    }, 250);
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      clearInterval(interval);
+    };
+  }, [useYouTubeEmbed, youtubeId, onTimeUpdate]);
+
   // Jump to seek timestamp when requested by external components (transcript, moments)
   useEffect(() => {
-    if (seekTime !== null && videoRef.current) {
-      videoRef.current.currentTime = seekTime;
-      videoRef.current.play().catch(() => {});
+    if (seekTime !== null) {
+      if (useYouTubeEmbed && iframeRef.current?.contentWindow) {
+        iframeRef.current.contentWindow.postMessage(
+          JSON.stringify({ event: 'command', func: 'seekTo', args: [seekTime, true] }),
+          '*'
+        );
+      } else if (videoRef.current) {
+        videoRef.current.currentTime = seekTime;
+        videoRef.current.play().catch(() => {});
+      }
     }
-  }, [seekTime]);
+  }, [seekTime, useYouTubeEmbed]);
 
   // Time update handler
   const handleTimeUpdate = () => {
@@ -140,7 +233,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   const skipSeconds = (seconds: number) => {
-    if (videoRef.current) {
+    if (useYouTubeEmbed && iframeRef.current?.contentWindow) {
+      const nextTime = Math.max(0, currentTime + seconds);
+      iframeRef.current.contentWindow.postMessage(
+        JSON.stringify({ event: 'command', func: 'seekTo', args: [nextTime, true] }),
+        '*'
+      );
+      onTimeUpdate(nextTime);
+    } else if (videoRef.current) {
       videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime + seconds);
     }
   };
@@ -153,8 +253,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setPlaybackRateOpen(false);
   };
 
-  // Find active subtitle segment matching current time (safely parsing numeric timestamps)
-  const currentSubtitles = subtitleTracks[activeLanguage] || subtitleTracks[selectedLanguage] || initialSegments;
+  // Find active subtitle segment strictly for activeLanguage (never uncommitted dropdown selection)
+  const currentSubtitles = useMemo(() => {
+    if (subtitleTracks[activeLanguage] && subtitleTracks[activeLanguage].length > 0) {
+      return subtitleTracks[activeLanguage];
+    }
+    if (activeLanguage.toLowerCase() === originalLanguageName.toLowerCase()) {
+      return initialSegments;
+    }
+    return subtitleTracks[activeLanguage] || [];
+  }, [subtitleTracks, activeLanguage, originalLanguageName, initialSegments]);
+
   const activeSubtitle = useMemo(() => {
     if (!ccEnabled || !currentSubtitles || currentSubtitles.length === 0) return null;
     return currentSubtitles.find((s) => {
@@ -165,31 +274,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     });
   }, [ccEnabled, currentSubtitles, currentTime]);
 
-  // Switch subtitle track immediately when an existing or original language is selected
+  // Changing dropdown selection alone MUST NOT switch active subtitle track
   const handleLanguageSelect = (newLanguage: string) => {
     setSelectedLanguage(newLanguage);
-    const isOrig = newLanguage.toLowerCase() === originalLanguageName.toLowerCase();
-    const existingTrack = subtitleTracks[newLanguage] || (isOrig ? initialSegments : undefined);
-
-    if (existingTrack && existingTrack.length > 0) {
-      if (!subtitleTracks[newLanguage] && isOrig) {
-        setSubtitleTracks((prev) => ({
-          ...prev,
-          [originalLanguageName]: initialSegments,
-          [originalLanguageCode]: initialSegments,
-        }));
-      }
-      setActiveLanguage(newLanguage);
-      if (!ccEnabled) setCcEnabled(true);
-      setTranslationMessage({
-        type: 'success',
-        text: isOrig ? `Active subtitles: ${originalLanguageName} (Original)` : `Switched to ${newLanguage} subtitles`,
-      });
-      setTimeout(() => setTranslationMessage(null), 2500);
-    }
   };
 
-  // Handle subtitle translation request
+  // Handle subtitle translation request triggered ONLY on Translate button click
   const handleTranslateSubtitles = async () => {
     setTranslationMessage(null);
     if (!selectedLanguage) return;
@@ -199,19 +289,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       setCcEnabled(true);
     }
 
-    // 1. If target language is already cached, apply immediately without re-translating
-    if (subtitleTracks[selectedLanguage] && subtitleTracks[selectedLanguage].length > 0) {
-      setActiveLanguage(selectedLanguage);
-      setTranslationMessage({
-        type: 'success',
-        text: `Switched to ${selectedLanguage} subtitles`,
-      });
-      setTimeout(() => setTranslationMessage(null), 3000);
+    const target = selectedLanguage;
+    const isOrig = target.toLowerCase() === originalLanguageName.toLowerCase();
+
+    // If target is already active, no-op
+    if (target.toLowerCase() === activeLanguage.toLowerCase()) {
       return;
     }
 
-    // 2. If target language matches detected original language, use initialSegments
-    if (selectedLanguage.toLowerCase() === originalLanguageName.toLowerCase()) {
+    // 1. If target language matches original language, switch back to initial segments
+    if (isOrig) {
       setSubtitleTracks((prev) => ({
         ...prev,
         [originalLanguageName]: initialSegments,
@@ -226,18 +313,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       return;
     }
 
+    // 2. If target language is already cached in session, apply immediately
+    const cachedTrack = subtitleTracks[target];
+    if (cachedTrack && cachedTrack.length > 0) {
+      setActiveLanguage(target);
+      setTranslationMessage({
+        type: 'success',
+        text: `Switched to ${target} subtitles`,
+      });
+      setTimeout(() => setTranslationMessage(null), 3000);
+      return;
+    }
+
     // 3. Call backend subtitle translation
+    const currentReqId = ++requestIdRef.current;
     setIsTranslating(true);
     try {
-      const res = await api.translateSubtitles(videoId, selectedLanguage);
+      const res = await api.translateSubtitles(videoId, target);
+      if (currentReqId !== requestIdRef.current) return;
+
       if (res && res.segments && res.segments.length > 0) {
-        const canonicalName = res.target_language || selectedLanguage;
+        const canonicalName = res.target_language || target;
         const canonicalCode = res.target_language_code;
 
         setSubtitleTracks((prev) => {
           const updated = {
             ...prev,
-            [selectedLanguage]: res.segments,
+            [target]: res.segments,
             [canonicalName]: res.segments,
           };
           if (canonicalCode) {
@@ -253,21 +355,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       } else {
         setTranslationMessage({
           type: 'error',
-          text: `No subtitle segments returned for ${selectedLanguage}.`,
+          text: `No subtitle segments returned for ${target}.`,
         });
       }
     } catch (err: any) {
+      if (currentReqId !== requestIdRef.current) return;
       console.error('Subtitle translation error:', err);
       let errorDetail = err.response?.data?.detail;
       if (!errorDetail) {
         if (typeof err.response?.data === 'string' && err.response.data.includes('<!DOCTYPE')) {
-          errorDetail = 'Backend API is not reachable on Vercel. Please set VITE_BACKEND_URL in Vercel Environment Variables to your deployed backend URL.';
+          errorDetail = 'Backend API is not reachable. Check server connection.';
         } else if (err.message === 'Network Error' || !err.response) {
           errorDetail = import.meta.env.PROD
-            ? 'Cannot connect to production backend. Check VITE_BACKEND_URL and CORS settings.'
+            ? 'Cannot connect to production backend. Check backend URL and CORS settings.'
             : 'Cannot connect to local backend at http://localhost:8000. Ensure the FastAPI server is running.';
         } else {
-          errorDetail = err.message || `Failed to translate subtitles into ${selectedLanguage}.`;
+          errorDetail = err.message || `Failed to translate subtitles into ${target}.`;
         }
       }
       setTranslationMessage({
@@ -275,8 +378,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         text: errorDetail,
       });
     } finally {
-      setIsTranslating(false);
-      setTimeout(() => setTranslationMessage(null), 4000);
+      if (currentReqId === requestIdRef.current) {
+        setIsTranslating(false);
+        setTimeout(() => setTranslationMessage(null), 4000);
+      }
     }
   };
 
@@ -363,6 +468,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         ) : useYouTubeEmbed && youtubeId ? (
           <div style={{ position: 'relative', width: '100%', height: '100%' }}>
             <iframe
+              ref={iframeRef}
               src={`https://www.youtube-nocookie.com/embed/${youtubeId}?autoplay=1&enablejsapi=1`}
               title={videoTitle || 'YouTube player'}
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -582,7 +688,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               }}
               title="Select subtitle language"
             >
-              {SUPPORTED_LANGUAGES.map((lang) => {
+              {languageOptions.map((lang) => {
                 const isOrig = lang.name.toLowerCase() === originalLanguageName.toLowerCase();
                 const isCached = Boolean(subtitleTracks[lang.name] || subtitleTracks[lang.code]);
                 const isActive = lang.name.toLowerCase() === activeLanguage.toLowerCase();
@@ -594,7 +700,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               })}
             </select>
 
-            {/* Translate / Apply Button */}
+            {/* Translate Button */}
             <button
               onClick={handleTranslateSubtitles}
               disabled={isTranslating}
@@ -608,7 +714,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 selectedLanguage.toLowerCase() === activeLanguage.toLowerCase()
                   ? `${selectedLanguage} subtitles are currently active on video`
                   : subtitleTracks[selectedLanguage] || selectedLanguage.toLowerCase() === originalLanguageName.toLowerCase()
-                  ? `Apply cached ${selectedLanguage} subtitles to video`
+                  ? `Apply ${selectedLanguage} subtitles to video`
                   : `Translate subtitles into ${selectedLanguage}`
               }
             >
@@ -622,14 +728,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   <Check size={13} />
                   <span>Active</span>
                 </>
-              ) : subtitleTracks[selectedLanguage] || selectedLanguage.toLowerCase() === originalLanguageName.toLowerCase() ? (
-                <>
-                  <Check size={13} />
-                  <span>Apply</span>
-                </>
               ) : (
                 <>
-                  <Check size={13} />
+                  <Languages size={13} />
                   <span>Translate</span>
                 </>
               )}

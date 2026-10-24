@@ -40,8 +40,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [googleLoading, setGoogleLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(initialMessage || null);
-  const [showConfirmOption, setShowConfirmOption] = useState(false);
-  const [confirming, setConfirming] = useState(false);
 
   // Sync initialEmail and initialMessage if they change
   React.useEffect(() => {
@@ -72,26 +70,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     }
   };
 
-  const handleConfirmAccount = async () => {
-    if (!email.trim()) return;
-    setConfirming(true);
-    setFormError(null);
-    try {
-      const res = await api.confirmAccount(email.trim());
-      setSuccessMessage(res.message || 'Email verified successfully! You can now sign in.');
-      setShowConfirmOption(false);
-    } catch (err: any) {
-      setFormError(err.response?.data?.detail || 'Unable to verify account automatically.');
-    } finally {
-      setConfirming(false);
-    }
-  };
-
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
     setSuccessMessage(null);
-    setShowConfirmOption(false);
     clearAuthError();
 
     if (!email.trim() || !password) {
@@ -111,19 +93,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         const errorMsg = error.message || '';
         const lowerMsg = errorMsg.toLowerCase();
 
-        if (lowerMsg.includes('email not confirmed')) {
-          setFormError('Your email address has not been confirmed yet. Click below to verify and activate your account.');
-          setShowConfirmOption(true);
-        } else if (lowerMsg.includes('invalid') || lowerMsg.includes('credentials')) {
+        if (lowerMsg.includes('invalid') || lowerMsg.includes('credentials')) {
           try {
             const methodInfo = await api.checkAuthMethod(email.trim());
             if (methodInfo.exists && methodInfo.has_google && !methodInfo.has_email) {
               setFormError('This account was created with Google Sign-In. You can click "Continue with Google" above to sign in directly.');
             } else if (!methodInfo.exists) {
               setFormError('No account found with this email. Please check for typos or click "Create New Account" below.');
-            } else if (!methodInfo.is_confirmed) {
-              setFormError('Your email address has not been confirmed yet. Click below to activate your account.');
-              setShowConfirmOption(true);
             } else {
               setFormError('Incorrect email or password. Please verify your credentials or click "Forgot password?".');
             }
@@ -294,33 +270,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} color="#ef4444" />
               <span style={{ flex: 1 }}>{displayError}</span>
             </div>
-
-            {showConfirmOption && (
-              <button
-                type="button"
-                onClick={handleConfirmAccount}
-                disabled={confirming}
-                style={{
-                  alignSelf: 'flex-start',
-                  marginTop: '0.2rem',
-                  padding: '0.4rem 0.85rem',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  borderRadius: '6px',
-                  background: '#ef4444',
-                  color: '#ffffff',
-                  border: 'none',
-                  cursor: confirming ? 'wait' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  boxShadow: '0 2px 6px rgba(239, 68, 68, 0.4)',
-                }}
-              >
-                <ShieldCheck size={14} />
-                <span>{confirming ? 'Activating Account...' : 'Verify Email & Activate Account'}</span>
-              </button>
-            )}
           </div>
         )}
 

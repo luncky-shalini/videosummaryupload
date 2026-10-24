@@ -33,6 +33,7 @@ const SUPPORTED_LANGUAGES = [
   { name: 'Hindi', native: 'हिन्दी' },
   { name: 'Spanish', native: 'Español' },
   { name: 'Chinese', native: '中文' },
+  { name: 'Korean', native: '한국어' },
   { name: 'Italian', native: 'Italiano' },
   { name: 'Bengali', native: 'বাংলা' },
   { name: 'French', native: 'Français' },
@@ -41,6 +42,14 @@ const SUPPORTED_LANGUAGES = [
   { name: 'Portuguese', native: 'Português' },
   { name: 'Russian', native: 'Русский' },
   { name: 'Arabic', native: 'العربية' },
+  { name: 'Tamil', native: 'தமிழ்' },
+  { name: 'Kannada', native: 'ಕನ್ನಡ' },
+  { name: 'Malayalam', native: 'മലയാളം' },
+  { name: 'Marathi', native: 'मराठी' },
+  { name: 'Gujarati', native: 'ગુજરાતી' },
+  { name: 'Punjabi', native: 'ਪੰਜਾਬੀ' },
+  { name: 'Turkish', native: 'Türkçe' },
+  { name: 'Vietnamese', native: 'Tiếng Việt' },
 ];
 
 export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({

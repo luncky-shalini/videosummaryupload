@@ -185,12 +185,12 @@ Respond with a JSON object:
                     temperature=0.1
                 )
                 parsed = json.loads(res.choices[0].message.content)
-                items = parsed.get("translations") or []
+                items = parsed.get("translations") or parsed.get("segments") or parsed.get("items") or []
                 if not items and isinstance(parsed, list):
                     items = parsed
                 for it in items:
                     if isinstance(it, dict) and "id" in it:
-                        text_val = it.get("translated_text") or it.get("text") or ""
+                        text_val = it.get("translated_text") or it.get("text") or it.get("translation") or ""
                         try:
                             int_id = int(it["id"])
                             translated_map[int_id] = text_val
@@ -198,12 +198,10 @@ Respond with a JSON object:
                             pass
                         translated_map[str(it["id"])] = text_val
             except Exception as e:
-                # Fallback to original text for this chunk if translation encounters an error
-                for it in chunk:
-                    orig_text = it.get("text", "")
-                    if it["id"] not in translated_map:
-                        translated_map[it["id"]] = orig_text
-                        translated_map[str(it["id"])] = orig_text
+                raise RuntimeError(f"Translation service failed: {str(e)}")
+
+        if segments and not translated_map:
+            raise RuntimeError(f"Translation service returned empty response for {target_language}.")
 
         result = []
         for idx, s in enumerate(segments):

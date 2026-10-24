@@ -185,25 +185,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signInWithEmail = async (email: string, pass: string) => {
     if (!isConfigured) return { error: new Error('Supabase not configured') };
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
+    const trimmedEmail = email.trim().toLowerCase();
+    let res = await supabase.auth.signInWithPassword({
+      email: trimmedEmail,
       password: pass,
     });
-    if (data?.session) {
-      setSession(data.session);
-      setUser(data.session.user);
-      setAuthError(null);
-      syncProfileToDatabase(data.session.user);
+
+    // If Supabase reports email not confirmed (e.g. account created prior to disabling email confirmation),
+    // automatically confirm the account at the Supabase database level and retry sign-in immediately.
+    if (res.error && res.error.message?.toLowerCase().includes('email not confirmed')) {
+      try {
+        await api.confirmAccount(trimmedEmail);
+        res = await supabase.auth.signInWithPassword({
+          email: trimmedEmail,
+          password: pass,
+        });
+      } catch (confirmErr) {
+        console.warn('Auto-confirmation attempt:', confirmErr);
+      }
     }
-    return { data, error };
+
+    if (res.data?.session) {
+      setSession(res.data.session);
+      setUser(res.data.session.user);
+      setAuthError(null);
+      syncProfileToDatabase(res.data.session.user);
+    }
+    return res;
   };
 
   const signUpWithEmail = async (email: string, pass: string, fullName?: string) => {
     if (!isConfigured) return { error: new Error('Supabase not configured') };
+    const trimmedEmail = email.trim().toLowerCase();
     
     // Existing Supabase registration flow
     const { data, error } = await supabase.auth.signUp({
-      email,
+      email: trimmedEmail,
       password: pass,
       options: {
         data: { full_name: fullName, name: fullName },
@@ -211,11 +228,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     if (error) {
-      // Fallback via backend only if Supabase free-tier SMTP rate limit is reached
-      if (error.message?.toLowerCase().includes('rate limit')) {
+      // Fallback via backend if Supabase free-tier SMTP rate limit is reached
+      if (error.message?.toLowerCase().includes('rate limit') || error.message?.toLowerCase().includes('smtp')) {
         try {
-          await api.registerUser(email, pass, fullName);
-          return { data: { user: { email } }, error: null };
+          const regRes = await api.registerUser(trimmedEmail, pass, fullName);
+          return { data: { user: { email: trimmedEmail, id: regRes.user_id } }, error: null };
         } catch (apiErr: any) {
           return { data: null, error: apiErr.response?.data?.detail ? new Error(apiErr.response.data.detail) : error };
         }
@@ -223,13 +240,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { data, error };
     }
 
-    // Ensure session is cleared locally so the user transitions to the Sign In page
+    // Ensure account is confirmed at the Supabase database level so no confirmation email is required
+    if (data?.user && !data.user.email_confirmed_at) {
+      try {
+        await api.confirmAccount(trimmedEmail);
+      } catch (confirmErr) {
+        console.warn('Auto-confirmation on registration:', confirmErr);
+      }
+    }
+
+    // Ensure session is cleared locally so the user transitions cleanly to the Sign In page
     if (data?.session) {
       try {
         await supabase.auth.signOut({ scope: 'local' });
       } catch {}
     }
-    return { data, error };
+    return { data, error: null };
   };
 
   const resetPassword = async (email: string) => {
