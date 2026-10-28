@@ -504,9 +504,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               console.warn('Video element playback notification:', e);
               // Only report error if duration is 0 and source was attempted
               if (videoRef.current && videoRef.current.networkState === 3) {
-                setPlaybackError(
-                  'The media file could not be loaded. Please ensure the backend is running and the video was extracted successfully.'
-                );
+                if (youtubeId) {
+                  // Fall back seamlessly to YouTube player embed so video playback continues
+                  setUseYouTubeEmbed(true);
+                  setPlaybackError(null);
+                } else {
+                  setPlaybackError(
+                    'The media file could not be loaded. Please ensure the backend is running and the video was extracted successfully.'
+                  );
+                }
               }
             }}
             style={{ width: '100%', height: '100%', objectFit: 'contain' }}

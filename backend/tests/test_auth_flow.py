@@ -57,3 +57,39 @@ def test_confirm_account_endpoint():
     res = client.post("/api/auth/confirm-account", json={"email": "anikita123@gmail.com"})
     assert res.status_code == 200
     assert res.json()["success"] is True
+
+
+def test_unauthenticated_protected_endpoints():
+    """Requirement 5: Ensure protected endpoints reject unauthenticated requests with 401."""
+    fake_id = "00000000-0000-0000-0000-000000000000"
+    
+    # 1. Videos listing
+    assert client.get("/api/videos").status_code == 401
+
+    # 2. Upload video
+    assert client.post("/api/videos/upload").status_code == 401
+
+    # 3. Import URL
+    assert client.post("/api/videos/import-url", json={"url": "https://youtu.be/test"}).status_code == 401
+
+    # 4. Video detail
+    assert client.get(f"/api/videos/{fake_id}").status_code == 401
+
+    # 5. Media stream
+    assert client.get(f"/api/videos/{fake_id}/stream").status_code == 401
+
+    # 6. Status polling
+    assert client.get(f"/api/videos/{fake_id}/status").status_code == 401
+
+    # 7. PDF export
+    assert client.get(f"/api/videos/{fake_id}/export/pdf").status_code == 401
+
+    # 8. AI Chat
+    assert client.post(f"/api/videos/{fake_id}/chat", json={"question": "summarize"}).status_code == 401
+
+    # 9. Subtitle translation
+    assert client.post(f"/api/videos/{fake_id}/subtitles/translate", json={"target_language": "Telugu"}).status_code == 401
+
+    # 10. Delete video
+    assert client.delete(f"/api/videos/{fake_id}").status_code == 401
+

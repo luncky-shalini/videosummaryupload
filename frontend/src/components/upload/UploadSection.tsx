@@ -7,21 +7,29 @@ interface UploadSectionProps {
   onVideoCreated: (video: Video) => void;
   onOpenAuth: () => void;
   isAuthenticated: boolean;
+  initialOpenYouTube?: boolean;
 }
 
 export const UploadSection: React.FC<UploadSectionProps> = ({
   onVideoCreated,
   onOpenAuth,
   isAuthenticated,
+  initialOpenYouTube = false,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [customTitle, setCustomTitle] = useState('');
   const [urlInput, setUrlInput] = useState('');
-  const [showUrlModal, setShowUrlModal] = useState(false);
+  const [showUrlModal, setShowUrlModal] = useState(initialOpenYouTube);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (initialOpenYouTube) {
+      setShowUrlModal(true);
+    }
+  }, [initialOpenYouTube]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 

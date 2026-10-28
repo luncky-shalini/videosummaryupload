@@ -168,10 +168,11 @@ async def get_video_detail(video_id: str, user: dict = Depends(get_current_user)
 @router.get("/{video_id}/stream")
 async def stream_video_file(
     video_id: str,
-    user: Optional[dict] = Depends(get_optional_user)
+    user: dict = Depends(get_current_user)
 ):
     """
     Streams the local video file for browser playback.
+    Requires an authenticated user session/token (via Bearer header or ?token= query parameter).
     Supports HTTP Range requests for seamless video scrubbing and playback.
     """
     supabase = get_supabase_admin()
@@ -179,8 +180,8 @@ async def stream_video_file(
     video = v_res.data
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
-    if user and video.get("user_id") and video["user_id"] != user["id"]:
-        raise HTTPException(status_code=403, detail="Forbidden")
+    if video.get("user_id") and video["user_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="Forbidden: You do not own this video")
 
     filepath = video.get("storage_path")
     if not filepath or not os.path.exists(filepath):

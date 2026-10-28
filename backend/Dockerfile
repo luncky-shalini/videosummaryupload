@@ -1,10 +1,13 @@
 # Production Dockerfile for backend service (Render / Railway / Fly.io / VPS)
 FROM python:3.12-slim
 
-# Install system dependencies including FFmpeg and curl
+# Install system dependencies including FFmpeg, curl, and Unicode fonts for PDF reports
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
+    fonts-dejavu-core \
+    fonts-noto-cjk \
+    fonts-noto-core \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

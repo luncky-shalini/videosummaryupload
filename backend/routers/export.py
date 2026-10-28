@@ -121,8 +121,9 @@ async def export_docx(
         segments = seg_res.data or []
 
     if lang:
-        from routers.transcript import SUBTITLE_CACHE
-        cache_key = f"{video_id}_{lang.strip().lower()}"
+        from routers.transcript import SUBTITLE_CACHE, normalize_language
+        canonical_code, _ = normalize_language(lang)
+        cache_key = f"{video_id}_{canonical_code}"
         if cache_key in SUBTITLE_CACHE:
             segments = SUBTITLE_CACHE[cache_key]
 
@@ -169,8 +170,9 @@ async def export_txt(
         segments = seg_res.data or []
 
     if lang:
-        from routers.transcript import SUBTITLE_CACHE
-        cache_key = f"{video_id}_{lang.strip().lower()}"
+        from routers.transcript import SUBTITLE_CACHE, normalize_language
+        canonical_code, _ = normalize_language(lang)
+        cache_key = f"{video_id}_{canonical_code}"
         if cache_key in SUBTITLE_CACHE:
             segments = SUBTITLE_CACHE[cache_key]
 

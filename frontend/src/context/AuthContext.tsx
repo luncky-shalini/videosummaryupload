@@ -73,7 +73,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(currentSession.user);
         setAuthError(null);
         syncProfileToDatabase(currentSession.user);
-        if (typeof window !== 'undefined' && window.location.search.includes('code=')) {
+        if (typeof window !== 'undefined' && (window.location.search.includes('code=') || window.location.hash.includes('access_token=') || window.location.hash.includes('error='))) {
           window.history.replaceState({}, document.title, window.location.pathname);
         }
       } else if (event === 'INITIAL_SESSION' || event === 'SIGNED_OUT' || !currentSession) {
@@ -100,7 +100,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser(fallbackSession.user);
           setAuthError(null);
           syncProfileToDatabase(fallbackSession.user);
-          if (typeof window !== 'undefined' && window.location.search.includes('code=')) {
+          if (typeof window !== 'undefined' && (window.location.search.includes('code=') || window.location.hash.includes('access_token=') || window.location.hash.includes('error='))) {
             window.history.replaceState({}, document.title, window.location.pathname);
           }
         }

@@ -86,9 +86,14 @@ class DocxReportGenerator:
                     
                     for item in action_items:
                         row_cells = table.add_row().cells
-                        row_cells[0].text = _clean_xml_str(item.get("item", ""))
-                        row_cells[1].text = _clean_xml_str(item.get("owner", "Unassigned"))
-                        row_cells[2].text = _clean_xml_str(item.get("deadline", "Not specified"))
+                        if isinstance(item, dict):
+                            row_cells[0].text = _clean_xml_str(item.get("item", ""))
+                            row_cells[1].text = _clean_xml_str(item.get("owner", "Unassigned"))
+                            row_cells[2].text = _clean_xml_str(item.get("deadline", "Not specified"))
+                        else:
+                            row_cells[0].text = _clean_xml_str(str(item))
+                            row_cells[1].text = "Unassigned"
+                            row_cells[2].text = "Not specified"
 
             # Key Topics
             key_topics = summary.get("key_topics", [])
@@ -103,9 +108,12 @@ class DocxReportGenerator:
                 doc.add_heading("Key Moments & Timeline", level=1)
                 for km in key_moments:
                     p = doc.add_paragraph()
-                    r_time = p.add_run(_clean_xml_str(f"[{km.get('time', '00:00')}] {km.get('title', '')}: "))
-                    r_time.bold = True
-                    p.add_run(_clean_xml_str(km.get("description", "")))
+                    if isinstance(km, dict):
+                        r_time = p.add_run(_clean_xml_str(f"[{km.get('time', '00:00')}] {km.get('title', '')}: "))
+                        r_time.bold = True
+                        p.add_run(_clean_xml_str(km.get("description", "")))
+                    else:
+                        p.add_run(_clean_xml_str(str(km)))
 
         # Chronological Dialogue Transcript
         if export_type in ("full", "transcript") and segments:

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_ROLE_KEY: str = ""
     SUPABASE_JWT_SECRET: str = ""
     
+    FRONTEND_URL: str = "http://localhost:5173"
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
     MEDIA_STORAGE_TYPE: str = "local" # "local" or "supabase"
     UPLOAD_DIR: str = "./uploads"
@@ -23,7 +24,10 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> List[str]:
-        return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+        origins = [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+        if self.FRONTEND_URL and self.FRONTEND_URL.strip() not in origins:
+            origins.append(self.FRONTEND_URL.strip())
+        return origins
 
 settings = Settings()
 

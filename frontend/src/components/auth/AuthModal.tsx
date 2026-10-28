@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Sparkles, AlertCircle } from 'lucide-react';
+import { X, Sparkles, AlertCircle, Mail, Lock, User as UserIcon, Loader2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 interface AuthModalProps {
@@ -8,9 +8,23 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
-  const { signInWithGoogle, authError, clearAuthError } = useAuth();
+  const {
+    signInWithGoogle,
+    signInWithEmail,
+    signUpWithEmail,
+    authError,
+    clearAuthError,
+  } = useAuth();
+
+  const [activeTab, setActiveTab] = useState<'signin' | 'signup'>('signin');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  // Form states
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
 
   if (!isOpen) return null;
 
@@ -19,11 +33,57 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const handleGoogleSignIn = async () => {
     setError(null);
     clearAuthError();
-    setLoading(true);
+    setGoogleLoading(true);
     try {
       await signInWithGoogle();
+      // Google sign-in redirects page; modal will close naturally
     } catch (err: any) {
       setError(err.message || 'Google sign in failed');
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleEmailSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    clearAuthError();
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) {
+      setError('Please provide both email and password.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      if (activeTab === 'signin') {
+        const res = await signInWithEmail(trimmedEmail, password);
+        if (res.error) {
+          setError(res.error.message || 'Invalid email or password.');
+          setLoading(false);
+          return;
+        }
+        // Success
+        onClose();
+      } else {
+        const res = await signUpWithEmail(trimmedEmail, password, fullName.trim() || undefined);
+        if (res.error) {
+          setError(res.error.message || 'Could not create account.');
+          setLoading(false);
+          return;
+        }
+        // Account created; automatically sign in
+        const loginRes = await signInWithEmail(trimmedEmail, password);
+        if (!loginRes.error) {
+          onClose();
+        } else {
+          setActiveTab('signin');
+          setError('Account created! Please sign in with your password.');
+        }
+      }
+    } catch (err: any) {
+      setError(err.message || 'Authentication failed. Please try again.');
+    } finally {
       setLoading(false);
     }
   };
@@ -34,7 +94,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         className="glass-panel animate-fade-in"
         style={{
           width: '100%',
-          maxWidth: '440px',
+          maxWidth: '460px',
           padding: '2.25rem 2rem',
           position: 'relative',
         }}
@@ -56,7 +116,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           <X size={20} />
         </button>
 
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+        <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
           <div
             style={{
               width: '52px',
@@ -75,8 +135,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           <h2 style={{ fontSize: '1.5rem', fontWeight: 700, margin: '0 0 0.35rem' }}>
             Welcome to SynopAI
           </h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>
-            Sign in with your Google account to analyze and store your video transcripts and AI synopses.
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: 0 }}>
+            Sign in or create an account to process videos and generate AI synopses.
           </p>
         </div>
 
@@ -100,10 +160,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           </div>
         )}
 
-        {/* The Original "Continue with Google" Button */}
+        {/* 1. Continue with Google */}
         <button
           onClick={handleGoogleSignIn}
-          disabled={loading}
+          disabled={googleLoading || loading}
           type="button"
           style={{
             width: '100%',
@@ -114,14 +174,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             border: 'none',
             fontWeight: 600,
             fontSize: '0.95rem',
-            cursor: loading ? 'not-allowed' : 'pointer',
-            opacity: loading ? 0.8 : 1,
+            cursor: googleLoading ? 'not-allowed' : 'pointer',
+            opacity: googleLoading ? 0.8 : 1,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             gap: '0.75rem',
             boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-            marginBottom: '0.5rem',
+            marginBottom: '1.25rem',
             transition: 'var(--transition-smooth)',
           }}
         >
@@ -143,11 +203,184 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
             />
           </svg>
-          {loading ? 'Connecting to Google...' : 'Continue with Google'}
+          {googleLoading ? 'Connecting to Google...' : 'Continue with Google'}
         </button>
 
+        {/* Divider */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            margin: '1rem 0 1.25rem',
+          }}
+        >
+          <div style={{ flex: 1, height: '1px', background: 'var(--border-subtle)' }} />
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            or continue with email
+          </span>
+          <div style={{ flex: 1, height: '1px', background: 'var(--border-subtle)' }} />
+        </div>
+
+        {/* Tab switcher: Sign In vs Create Account */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            background: 'rgba(255, 255, 255, 0.05)',
+            borderRadius: 'var(--radius-md)',
+            padding: '3px',
+            marginBottom: '1.25rem',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('signin');
+              setError(null);
+            }}
+            style={{
+              padding: '0.55rem',
+              borderRadius: 'var(--radius-sm)',
+              border: 'none',
+              background: activeTab === 'signin' ? 'var(--card-bg, #1e293b)' : 'transparent',
+              color: activeTab === 'signin' ? 'var(--text-main)' : 'var(--text-muted)',
+              fontWeight: 600,
+              fontSize: '0.88rem',
+              cursor: 'pointer',
+              boxShadow: activeTab === 'signin' ? '0 2px 6px rgba(0,0,0,0.2)' : 'none',
+              transition: 'var(--transition-smooth)',
+            }}
+          >
+            Sign In
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('signup');
+              setError(null);
+            }}
+            style={{
+              padding: '0.55rem',
+              borderRadius: 'var(--radius-sm)',
+              border: 'none',
+              background: activeTab === 'signup' ? 'var(--card-bg, #1e293b)' : 'transparent',
+              color: activeTab === 'signup' ? 'var(--text-main)' : 'var(--text-muted)',
+              fontWeight: 600,
+              fontSize: '0.88rem',
+              cursor: 'pointer',
+              boxShadow: activeTab === 'signup' ? '0 2px 6px rgba(0,0,0,0.2)' : 'none',
+              transition: 'var(--transition-smooth)',
+            }}
+          >
+            Create Account
+          </button>
+        </div>
+
+        {/* 2 & 3. Sign In or Create Account Form */}
+        <form onSubmit={handleEmailSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+          {activeTab === 'signup' && (
+            <div style={{ position: 'relative' }}>
+              <UserIcon
+                size={16}
+                color="var(--text-muted)"
+                style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)' }}
+              />
+              <input
+                type="text"
+                placeholder="Full Name"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '0.75rem 0.85rem 0.75rem 2.4rem',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-subtle)',
+                  background: 'rgba(255, 255, 255, 0.04)',
+                  color: 'var(--text-main)',
+                  fontSize: '0.9rem',
+                }}
+              />
+            </div>
+          )}
+
+          <div style={{ position: 'relative' }}>
+            <Mail
+              size={16}
+              color="var(--text-muted)"
+              style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)' }}
+            />
+            <input
+              type="email"
+              required
+              placeholder="Email address"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '0.75rem 0.85rem 0.75rem 2.4rem',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-subtle)',
+                background: 'rgba(255, 255, 255, 0.04)',
+                color: 'var(--text-main)',
+                fontSize: '0.9rem',
+              }}
+            />
+          </div>
+
+          <div style={{ position: 'relative' }}>
+            <Lock
+              size={16}
+              color="var(--text-muted)"
+              style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)' }}
+            />
+            <input
+              type="password"
+              required
+              placeholder="Password (minimum 6 characters)"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '0.75rem 0.85rem 0.75rem 2.4rem',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-subtle)',
+                background: 'rgba(255, 255, 255, 0.04)',
+                color: 'var(--text-main)',
+                fontSize: '0.9rem',
+              }}
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading || googleLoading}
+            className="gradient-btn"
+            style={{
+              width: '100%',
+              padding: '0.8rem',
+              fontSize: '0.92rem',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem',
+              marginTop: '0.4rem',
+            }}
+          >
+            {loading ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                <span>Processing...</span>
+              </>
+            ) : (
+              <span>{activeTab === 'signin' ? 'Sign In' : 'Create Account'}</span>
+            )}
+          </button>
+        </form>
+
         <p style={{ textAlign: 'center', fontSize: '0.78rem', color: 'var(--text-muted)', margin: '1rem 0 0' }}>
-          Secure authentication via Google OAuth. Creates a new account or signs into your existing account automatically.
+          Secure authentication powered by Supabase. Your data is encrypted and private.
         </p>
       </div>
     </div>

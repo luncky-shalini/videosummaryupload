@@ -180,11 +180,18 @@ class PDFReportGenerator:
                         Paragraph("<b>Deadline</b>", body_style)
                     ]]
                     for item in action_items:
-                        table_data.append([
-                            Paragraph(_clean_text(item.get("item", "")), body_style),
-                            Paragraph(_clean_text(item.get("owner", "Unassigned")), body_style),
-                            Paragraph(_clean_text(item.get("deadline", "Not specified")), body_style)
-                        ])
+                        if isinstance(item, dict):
+                            table_data.append([
+                                Paragraph(_clean_text(item.get("item", "")), body_style),
+                                Paragraph(_clean_text(item.get("owner", "Unassigned")), body_style),
+                                Paragraph(_clean_text(item.get("deadline", "Not specified")), body_style)
+                            ])
+                        else:
+                            table_data.append([
+                                Paragraph(_clean_text(str(item)), body_style),
+                                Paragraph("Unassigned", body_style),
+                                Paragraph("Not specified", body_style)
+                            ])
 
                     t = Table(table_data, colWidths=[270, 125, 125])
                     t.setStyle(TableStyle([
@@ -220,10 +227,13 @@ class PDFReportGenerator:
             if key_moments:
                 elements.append(Paragraph("Key Moments & Timeline", h1_style))
                 for km in key_moments:
-                    km_time = _clean_text(km.get('time', '00:00'))
-                    km_title = _clean_text(km.get('title', ''))
-                    km_desc = _clean_text(km.get('description', ''))
-                    km_text = f"<b>[{km_time}] {km_title}</b>: {km_desc}"
+                    if isinstance(km, dict):
+                        km_time = _clean_text(km.get('time', '00:00'))
+                        km_title = _clean_text(km.get('title', ''))
+                        km_desc = _clean_text(km.get('description', ''))
+                        km_text = f"<b>[{km_time}] {km_title}</b>: {km_desc}"
+                    else:
+                        km_text = f"<b>[00:00]</b>: {_clean_text(str(km))}"
                     elements.append(Paragraph(km_text, body_style))
                 elements.append(Spacer(1, 8))
 

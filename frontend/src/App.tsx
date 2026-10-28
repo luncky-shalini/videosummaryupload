@@ -23,6 +23,7 @@ export const App: React.FC = () => {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showChatDrawer, setShowChatDrawer] = useState(false);
+  const [openYouTubeModal, setOpenYouTubeModal] = useState(false);
 
   // Auth Routing: 'login' (Sign In) | 'register' (Create Account)
   const [authView, setAuthView] = useState<AuthView>(() => {
@@ -46,37 +47,116 @@ export const App: React.FC = () => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
+  // Synchronize URL and handle route guarding (Preserves requested destination when logging in)
+  useEffect(() => {
+    if (loading) return;
+
+    const path = window.location.pathname;
+    const search = window.location.search;
+
+    if (!user) {
+      // 1. Unauthenticated Route Guard
+      if (path === '/register' || path === '/signup') {
+        setAuthView('register');
+        if (path !== '/register') {
+          window.history.replaceState(null, '', '/register');
+        }
+      } else {
+        // Intercept direct navigation to protected video features, dashboard, history, or video ID
+        if (
+          path === '/upload' ||
+          path === '/youtube' ||
+          path === '/dashboard' ||
+          path === '/history' ||
+          path === '/videos' ||
+          path.startsWith('/video/') ||
+          search.includes('video=')
+        ) {
+          try {
+            sessionStorage.setItem('synopai_redirect_dest', path + search);
+          } catch {}
+        }
+        setAuthView('login');
+        if (path !== '/sign-in') {
+          window.history.replaceState(null, '', '/sign-in');
+        }
+      }
+      return;
+    }
+
+    // 2. Authenticated: Restore preserved destination if present, else parse direct URL
+    let savedDest: string | null = null;
+    try {
+      savedDest = sessionStorage.getItem('synopai_redirect_dest');
+      if (savedDest) {
+        sessionStorage.removeItem('synopai_redirect_dest');
+      }
+    } catch {}
+
+    const targetUrl = savedDest || (path + search);
+
+    if (targetUrl.startsWith('/video/')) {
+      const id = targetUrl.replace('/video/', '').split('?')[0].split('/')[0];
+      if (id) {
+        setActiveVideoId(id);
+        if (window.location.pathname !== `/video/${id}`) {
+          window.history.replaceState(null, '', `/video/${id}`);
+        }
+        return;
+      }
+    } else if (targetUrl.includes('video=')) {
+      const id = new URLSearchParams(targetUrl.split('?')[1] || '').get('video');
+      if (id) {
+        setActiveVideoId(id);
+        if (window.location.pathname !== `/video/${id}`) {
+          window.history.replaceState(null, '', `/video/${id}`);
+        }
+        return;
+      }
+    } else if (targetUrl === '/youtube') {
+      setOpenYouTubeModal(true);
+      window.history.replaceState(null, '', '/');
+      return;
+    } else if (targetUrl === '/history' || targetUrl === '/videos') {
+      setShowHistoryModal(true);
+      window.history.replaceState(null, '', '/');
+      return;
+    }
+
+    // If on auth routes while authenticated, cleanly redirect to dashboard
+    if (
+      path === '/login' ||
+      path === '/signin' ||
+      path === '/sign-in' ||
+      path === '/register' ||
+      path === '/signup'
+    ) {
+      window.history.replaceState(null, '', '/');
+    }
+  }, [user, loading]);
+
   // Handle browser back/forward buttons
   useEffect(() => {
     const handlePopState = () => {
-      if (window.location.pathname === '/register' || window.location.pathname === '/signup') {
-        setAuthView('register');
+      const path = window.location.pathname;
+      if (!user) {
+        if (path === '/register' || path === '/signup') {
+          setAuthView('register');
+        } else {
+          setAuthView('login');
+        }
       } else {
-        setAuthView('login');
+        if (path.startsWith('/video/')) {
+          const id = path.replace('/video/', '').split('?')[0].split('/')[0];
+          setActiveVideoId(id || null);
+        } else if (path === '/' || path === '/upload') {
+          setActiveVideoId(null);
+          setVideoDetail(null);
+        }
       }
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
-
-  // When user is authenticated, ensure clean URL path to dashboard
-  useEffect(() => {
-    if (user && (
-      window.location.pathname === '/login' ||
-      window.location.pathname === '/signin' ||
-      window.location.pathname === '/sign-in' ||
-      window.location.pathname === '/register' ||
-      window.location.pathname === '/signup'
-    )) {
-      window.history.replaceState(null, '', '/');
-    }
-  }, [user]);
-
-  // Normalize legacy /login or /signin URLs to /sign-in
-  useEffect(() => {
-    if (!user && (window.location.pathname === '/login' || window.location.pathname === '/signin')) {
-      window.history.replaceState(null, '', '/sign-in');
-    }
   }, [user]);
 
   const [loginPrefill, setLoginPrefill] = useState<{ email?: string; message?: string } | null>(null);
@@ -91,7 +171,6 @@ export const App: React.FC = () => {
     }
   };
 
-
   const navigateToRegister = () => {
     setAuthView('register');
     if (window.location.pathname !== '/register') {
@@ -99,22 +178,51 @@ export const App: React.FC = () => {
     }
   };
 
-  // Polling for processing status
+  // Video navigation & URL synchronizer
+  const selectVideo = (id: string | null) => {
+    setActiveVideoId(id);
+    if (id) {
+      if (window.location.pathname !== `/video/${id}`) {
+        window.history.pushState(null, '', `/video/${id}`);
+      }
+    } else {
+      setVideoDetail(null);
+      if (window.location.pathname !== '/') {
+        window.history.pushState(null, '', '/');
+      }
+    }
+  };
+
+  // Polling for processing status & project details
   useEffect(() => {
-    if (!activeVideoId) return;
+    if (!activeVideoId) {
+      setVideoDetail(null);
+      setLoadingDetail(false);
+      return;
+    }
 
     let intervalId: any = null;
+    let isCancelled = false;
+    setLoadingDetail(true);
 
     const checkStatus = async () => {
       try {
         const detail = await api.getVideoDetail(activeVideoId);
-        setVideoDetail(detail);
-
-        if (detail.video.status === 'completed' || detail.video.status === 'failed') {
-          clearInterval(intervalId);
+        if (!isCancelled) {
+          setVideoDetail(detail);
+          setLoadingDetail(false);
+          if (detail.video.status === 'completed' || detail.video.status === 'failed') {
+            clearInterval(intervalId);
+          }
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Status check error:', err);
+        if (!isCancelled) {
+          setLoadingDetail(false);
+          if (err.response?.status === 404 || err.response?.status === 403) {
+            clearInterval(intervalId);
+          }
+        }
       }
     };
 
@@ -123,11 +231,14 @@ export const App: React.FC = () => {
 
     // Poll every 3 seconds if not completed
     intervalId = setInterval(checkStatus, 3000);
-    return () => clearInterval(intervalId);
+    return () => {
+      isCancelled = true;
+      clearInterval(intervalId);
+    };
   }, [activeVideoId]);
 
   const handleVideoCreated = (video: Video) => {
-    setActiveVideoId(video.id);
+    selectVideo(video.id);
   };
 
   const handleSeek = (time: number) => {
@@ -205,10 +316,7 @@ export const App: React.FC = () => {
       <Navbar
         onOpenAuth={() => setShowAuthModal(true)}
         onOpenHistory={() => setShowHistoryModal(true)}
-        onNewAnalysis={() => {
-          setActiveVideoId(null);
-          setVideoDetail(null);
-        }}
+        onNewAnalysis={() => selectVideo(null)}
         theme={theme}
         onToggleTheme={toggleTheme}
       />
@@ -251,7 +359,71 @@ export const App: React.FC = () => {
             onVideoCreated={handleVideoCreated}
             onOpenAuth={() => setShowAuthModal(true)}
             isAuthenticated={Boolean(user)}
+            initialOpenYouTube={openYouTubeModal}
           />
+        )}
+
+        {/* VIEW 1.5: Project detail is loading from API */}
+        {activeVideoId && !videoDetail && loadingDetail && (
+          <div style={{ maxWidth: '640px', margin: '4rem auto', textAlign: 'center' }}>
+            <div className="glass-panel" style={{ padding: '3rem 2rem' }}>
+              <div
+                style={{
+                  width: '56px',
+                  height: '56px',
+                  borderRadius: '16px',
+                  background: 'rgba(99, 102, 241, 0.15)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: '1rem',
+                }}
+              >
+                <Loader2 size={28} color="#6366f1" className="animate-spin" />
+              </div>
+              <h3 style={{ fontSize: '1.3rem', fontWeight: 700, marginBottom: '0.4rem' }}>
+                Loading Video Project
+              </h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+                Retrieving synced transcriptions, summaries, and action items...
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* VIEW 1.6: Project detail failed to load */}
+        {activeVideoId && !videoDetail && !loadingDetail && (
+          <div style={{ maxWidth: '640px', margin: '4rem auto', textAlign: 'center' }}>
+            <div className="glass-panel" style={{ padding: '3rem 2rem' }}>
+              <div
+                style={{
+                  width: '56px',
+                  height: '56px',
+                  borderRadius: '16px',
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: '1rem',
+                }}
+              >
+                <AlertCircle size={28} color="#ef4444" />
+              </div>
+              <h3 style={{ fontSize: '1.3rem', fontWeight: 700, marginBottom: '0.4rem' }}>
+                Video Project Unavailable
+              </h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginBottom: '1.5rem' }}>
+                This project may have been deleted, or you may not have permission to view it.
+              </p>
+              <button
+                onClick={() => selectVideo(null)}
+                className="gradient-btn"
+                style={{ margin: '0 auto' }}
+              >
+                Return to Dashboard
+              </button>
+            </div>
+          </div>
         )}
 
         {/* VIEW 2: Active video loading / processing */}
@@ -428,7 +600,7 @@ export const App: React.FC = () => {
 
       {showHistoryModal && (
         <ProjectHistory
-          onSelectVideo={(id) => setActiveVideoId(id)}
+          onSelectVideo={(id) => selectVideo(id)}
           onClose={() => setShowHistoryModal(false)}
         />
       )}
