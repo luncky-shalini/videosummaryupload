@@ -1,8 +1,18 @@
+import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from routers import auth, videos, process, transcript, export, chat
+
+logger = logging.getLogger(__name__)
+
+# Provision and ensure FFmpeg is available on PATH for serverless and container runtimes
+try:
+    from services.ffmpeg_resolver import ensure_ffmpeg
+    ensure_ffmpeg()
+except Exception as e:
+    logger.warning(f"Initial FFmpeg provisioning notice: {e}")
 
 app = FastAPI(
     title="AI Video Synopsis & Meeting Transcription Platform API",
@@ -78,10 +88,18 @@ def read_root():
 @app.get("/health")
 @app.get("/api/health")
 def healthcheck():
+    ffmpeg_configured = False
+    try:
+        from services.ffmpeg_resolver import get_ffmpeg_path
+        ffmpeg_configured = bool(get_ffmpeg_path())
+    except Exception:
+        ffmpeg_configured = False
+
     return {
         "status": "healthy",
         "groq_configured": bool(settings.GROQ_API_KEY),
-        "supabase_configured": bool(settings.SUPABASE_URL and settings.SUPABASE_ANON_KEY)
+        "supabase_configured": bool(settings.SUPABASE_URL and settings.SUPABASE_ANON_KEY),
+        "ffmpeg_configured": ffmpeg_configured
     }
 
 @app.get("/api/docs", include_in_schema=False)

@@ -44,3 +44,4 @@ supabase/.env
 .DS_Store
 Thumbs.db
 *.log
+powershell.cmd

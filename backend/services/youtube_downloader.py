@@ -1,7 +1,12 @@
 import os
 import glob
+import logging
 import yt_dlp
 from typing import Dict, Any
+from services.ffmpeg_resolver import ensure_ffmpeg, get_ffmpeg_dir
+
+logger = logging.getLogger(__name__)
+
 
 class YouTubeDownloader:
     @staticmethod
@@ -10,10 +15,19 @@ class YouTubeDownloader:
         Downloads the best audio stream or lightweight video from a URL using yt-dlp.
         Returns dict with title, duration, output_filepath, thumbnail.
         Handles YouTube, Shorts, mobile links, and various formats reliably.
+        Configures ffmpeg_location so yt-dlp can locate the static FFmpeg binary in serverless environments.
         """
         os.makedirs(output_dir, exist_ok=True)
         outtmpl = os.path.join(output_dir, "%(id)s.%(ext)s")
-        
+
+        # Ensure FFmpeg is available and locate its directory for yt-dlp muxing
+        ffmpeg_location = None
+        try:
+            ensure_ffmpeg()
+            ffmpeg_location = get_ffmpeg_dir()
+        except Exception as e:
+            logger.warning(f"FFmpeg not available for YouTubeDownloader: {e}")
+
         ydl_opts = {
             # Prefer MP4 container with max 720p for rapid processing and streaming
             'format': 'bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]/best[height<=720]/best',
@@ -24,7 +38,10 @@ class YouTubeDownloader:
             'merge_output_format': 'mp4',
             'retries': 3,
         }
-        
+
+        if ffmpeg_location:
+            ydl_opts['ffmpeg_location'] = ffmpeg_location
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)

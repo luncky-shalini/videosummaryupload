@@ -7,6 +7,7 @@ from services.media_processor import MediaProcessor
 from services.groq_transcription import GroqTranscriptionService
 from services.groq_summarizer import GroqSummarizer
 from services.diarization import SpeakerDiarizer
+from services.ffmpeg_resolver import ensure_ffmpeg
 
 def execute_video_pipeline(video_id: str):
     """
@@ -32,6 +33,9 @@ def execute_video_pipeline(video_id: str):
             "status": "extracting",
             "progress_percent": 15
         }).eq("id", video_id).execute()
+
+        # Ensure FFmpeg is provisioned and on PATH
+        ensure_ffmpeg()
 
         # Ensure video media is available locally on disk (downloads from Supabase Storage if needed)
         from services.storage import StorageService
