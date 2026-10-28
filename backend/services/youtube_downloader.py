@@ -1,6 +1,7 @@
 import os
 import glob
 import logging
+import shutil
 import tempfile
 import yt_dlp
 from typing import Dict, Any, Optional
@@ -40,13 +41,39 @@ class YouTubeDownloader:
         return None
 
     @staticmethod
+    def _resolve_js_runtime() -> Optional[Dict[str, Dict[str, str]]]:
+        """
+        Discovers a JavaScript challenge solving runtime (Node.js, Deno, Bun)
+        supported by yt-dlp to solve YouTube signature/deobfuscation challenges.
+        """
+        # 1. Custom configured runtime path
+        if settings.YOUTUBE_JS_RUNTIME_PATH and os.path.exists(settings.YOUTUBE_JS_RUNTIME_PATH):
+            return {"node": {"path": os.path.abspath(settings.YOUTUBE_JS_RUNTIME_PATH)}}
+
+        # 2. Check for node or nodejs on system PATH
+        node_bin = shutil.which("node") or shutil.which("nodejs")
+        if node_bin:
+            return {"node": {"path": node_bin}}
+
+        # 3. Check for deno or bun on system PATH
+        deno_bin = shutil.which("deno")
+        if deno_bin:
+            return {"deno": {"path": deno_bin}}
+
+        bun_bin = shutil.which("bun")
+        if bun_bin:
+            return {"bun": {"path": bun_bin}}
+
+        return None
+
+    @staticmethod
     def _build_ydl_opts(output_dir: str, player_clients: list = None) -> Dict[str, Any]:
         """
         Constructs robust yt-dlp options with multi-client player rotation,
-        format fallback, and serverless FFmpeg path binding.
+        format fallback, PO token integration, and serverless FFmpeg path binding.
         """
         outtmpl = os.path.join(output_dir, "%(id)s.%(ext)s")
-        clients = player_clients or ['web_creator', 'android', 'ios', 'mweb']
+        clients = player_clients or ['web_creator', 'mweb', 'android', 'ios']
 
         # Ensure FFmpeg is available and locate its directory for yt-dlp muxing
         ffmpeg_location = None
@@ -55,6 +82,18 @@ class YouTubeDownloader:
             ffmpeg_location = get_ffmpeg_dir()
         except Exception as e:
             logger.warning(f"FFmpeg not available for YouTubeDownloader: {e}")
+
+        youtube_extractor_args: Dict[str, Any] = {
+            'player_client': clients
+        }
+
+        # Inject PO Token if configured
+        if settings.YOUTUBE_PO_TOKEN and settings.YOUTUBE_PO_TOKEN.strip():
+            youtube_extractor_args['po_token'] = [settings.YOUTUBE_PO_TOKEN.strip()]
+
+        # Inject Visitor Data if configured
+        if settings.YOUTUBE_VISITOR_DATA and settings.YOUTUBE_VISITOR_DATA.strip():
+            youtube_extractor_args['visitor_data'] = [settings.YOUTUBE_VISITOR_DATA.strip()]
 
         opts = {
             # Format selection: prefer 720p MP4 or high quality audio with fallback to best single stream
@@ -66,11 +105,14 @@ class YouTubeDownloader:
             'merge_output_format': 'mp4',
             'retries': 3,
             'extractor_args': {
-                'youtube': {
-                    'player_client': clients
-                }
+                'youtube': youtube_extractor_args
             }
         }
+
+        # Configure JS challenge solver if runtime is discovered
+        js_runtimes = YouTubeDownloader._resolve_js_runtime()
+        if js_runtimes:
+            opts['js_runtimes'] = js_runtimes
 
         if ffmpeg_location:
             opts['ffmpeg_location'] = ffmpeg_location
@@ -93,8 +135,10 @@ class YouTubeDownloader:
         os.makedirs(output_dir, exist_ok=True)
 
         client_profiles = [
-            ['web_creator', 'android', 'ios', 'mweb'],
-            ['ios', 'android'],
+            ['web_creator', 'mweb', 'android', 'ios'],
+            ['android', 'ios'],
+            ['tv', 'tv_embedded'],
+            ['web', 'default'],
         ]
 
         last_error = None
@@ -132,8 +176,10 @@ class YouTubeDownloader:
                     break
 
                 logger.warning(
-                    "YouTube download attempt %s failed; trying fallback client.",
+                    "YouTube download attempt %s failed (%s); trying fallback client profile %s.",
                     attempt,
+                    exc,
+                    attempt + 1,
                 )
 
         if last_error is not None or info is None:
@@ -148,12 +194,28 @@ class YouTubeDownloader:
                 or "po token" in lower_error
             ):
                 raise RuntimeError(
-                    "YouTube requires additional verification for this request. "
+                    "YouTube requires additional verification (bot detection) for this video from the server's network. "
                     "The configured downloader clients could not access this video. "
-                    "Try another publicly accessible video or upload the video file "
-                    "directly. If you administer this deployment, check the official "
-                    "yt-dlp documentation for supported YouTube authentication "
-                    "and PO Token configuration."
+                    "You can upload the video file directly (drag & drop above), or configure "
+                    "YOUTUBE_COOKIES_CONTENT or YOUTUBE_PO_TOKEN in your deployment settings."
+                ) from last_error
+
+            if "403" in lower_error or "forbidden" in lower_error:
+                raise RuntimeError(
+                    "YouTube returned HTTP 403 Forbidden. Access to this video or format is restricted "
+                    "by YouTube. Please try another video or upload the video file directly."
+                ) from last_error
+
+            if "unavailable" in lower_error or "private" in lower_error or "age" in lower_error:
+                raise RuntimeError(
+                    "This YouTube video is restricted or unavailable (it may be private, age-restricted, or removed). "
+                    "Please verify the URL or upload the video file directly."
+                ) from last_error
+
+            if "429" in lower_error or "too many requests" in lower_error:
+                raise RuntimeError(
+                    "YouTube returned HTTP 429 (Too Many Requests). The server is temporarily rate-limited by YouTube. "
+                    "Please try again shortly or upload the video file directly."
                 ) from last_error
 
             raise RuntimeError(

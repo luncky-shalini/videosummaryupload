@@ -4,6 +4,7 @@ FROM python:3.12-slim
 # Install system dependencies including FFmpeg, curl, and Unicode fonts for PDF reports
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    nodejs \
     curl \
     fonts-dejavu-core \
     fonts-noto-cjk \

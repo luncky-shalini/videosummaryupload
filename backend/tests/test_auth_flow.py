@@ -14,31 +14,51 @@ client = TestClient(app)
 
 def test_auth_check_method_nonexistent():
     """Verify check-method returns exists=False for unknown emails."""
-    res = client.post("/api/auth/check-method", json={"email": "nonexistent_user_999@test.com"})
-    assert res.status_code == 200
-    data = res.json()
-    assert data["exists"] is False
-    assert data["has_google"] is False
-    assert data["has_email"] is False
+    mock_supabase = MagicMock()
+    mock_supabase.auth.admin.list_users.return_value = []
+
+    with patch("routers.auth.get_supabase_admin", return_value=mock_supabase):
+        res = client.post("/api/auth/check-method", json={"email": "nonexistent_user_999@test.com"})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["exists"] is False
+        assert data["has_google"] is False
+        assert data["has_email"] is False
 
 
 def test_auth_check_method_existing_user():
     """Verify check-method correctly detects existing accounts."""
-    res = client.post("/api/auth/check-method", json={"email": "anikita123@gmail.com"})
-    assert res.status_code == 200
-    data = res.json()
-    assert data["exists"] is True
-    assert data["has_email"] is True
-    assert data["is_confirmed"] is True
+    mock_supabase = MagicMock()
+    mock_user = MagicMock()
+    mock_user.email = "anikita123@gmail.com"
+    mock_user.email_confirmed_at = "2024-01-01T00:00:00Z"
+    mock_user.app_metadata = {"provider": "email", "providers": ["email"]}
+    mock_supabase.auth.admin.list_users.return_value = [mock_user]
+
+    with patch("routers.auth.get_supabase_admin", return_value=mock_supabase):
+        res = client.post("/api/auth/check-method", json={"email": "anikita123@gmail.com"})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["exists"] is True
+        assert data["has_email"] is True
+        assert data["is_confirmed"] is True
 
 
 def test_auth_check_method_google_user():
     """Verify check-method correctly detects Google accounts."""
-    res = client.post("/api/auth/check-method", json={"email": "luckyshalu000@gmail.com"})
-    assert res.status_code == 200
-    data = res.json()
-    assert data["exists"] is True
-    assert data["has_google"] is True
+    mock_supabase = MagicMock()
+    mock_user = MagicMock()
+    mock_user.email = "luckyshalu000@gmail.com"
+    mock_user.email_confirmed_at = "2024-01-01T00:00:00Z"
+    mock_user.app_metadata = {"provider": "google", "providers": ["google"]}
+    mock_supabase.auth.admin.list_users.return_value = [mock_user]
+
+    with patch("routers.auth.get_supabase_admin", return_value=mock_supabase):
+        res = client.post("/api/auth/check-method", json={"email": "luckyshalu000@gmail.com"})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["exists"] is True
+        assert data["has_google"] is True
 
 
 def test_register_validation():
@@ -54,9 +74,16 @@ def test_register_validation():
 
 def test_confirm_account_endpoint():
     """Ensure confirm-account endpoint successfully confirms email without errors."""
-    res = client.post("/api/auth/confirm-account", json={"email": "anikita123@gmail.com"})
-    assert res.status_code == 200
-    assert res.json()["success"] is True
+    mock_supabase = MagicMock()
+    mock_user = MagicMock()
+    mock_user.email = "anikita123@gmail.com"
+    mock_user.email_confirmed_at = "2024-01-01T00:00:00Z"
+    mock_supabase.auth.admin.list_users.return_value = [mock_user]
+
+    with patch("routers.auth.get_supabase_admin", return_value=mock_supabase):
+        res = client.post("/api/auth/confirm-account", json={"email": "anikita123@gmail.com"})
+        assert res.status_code == 200
+        assert res.json()["success"] is True
 
 
 def test_unauthenticated_protected_endpoints():

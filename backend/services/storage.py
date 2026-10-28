@@ -10,6 +10,92 @@ logger = logging.getLogger(__name__)
 
 class StorageService:
     @staticmethod
+    def ensure_bucket(bucket_name: Optional[str] = None) -> bool:
+        """
+        Ensures the private storage bucket exists in Supabase Storage.
+        Creates it if it does not already exist.
+        """
+        bucket = bucket_name or settings.STORAGE_BUCKET_NAME
+        try:
+            supabase = get_supabase_admin()
+            try:
+                supabase.storage.get_bucket(bucket)
+                return True
+            except Exception:
+                pass
+
+            supabase.storage.create_bucket(
+                bucket,
+                options={"public": False, "file_size_limit": settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024}
+            )
+            logger.info(f"Created private Supabase Storage bucket: {bucket}")
+            return True
+        except Exception as e:
+            logger.warning(f"Could not verify/create Supabase Storage bucket {bucket}: {e}")
+            return False
+
+    @staticmethod
+    def create_signed_upload_url(user_id: str, video_id: str, filename: str) -> dict:
+        """
+        Generates a short-lived signed upload URL for direct-to-storage upload,
+        bypassing Vercel's 4.5MB serverless body payload limit.
+        Returns metadata including signed URL, token, object path, and persistent storage URI.
+        """
+        if settings.MEDIA_STORAGE_TYPE != "supabase":
+            return {
+                "video_id": video_id,
+                "upload_url": None,
+                "token": None,
+                "bucket": None,
+                "path": None,
+                "storage_path": None,
+                "direct_upload": False
+            }
+
+        bucket = settings.STORAGE_BUCKET_NAME
+        # Sanitize filename
+        safe_filename = "".join(c for c in filename if c.isalnum() or c in "._- ") or "media.mp4"
+        object_path = f"{user_id}/{video_id}_{safe_filename}"
+        storage_path = f"supabase://{bucket}/{object_path}"
+
+        try:
+            supabase = get_supabase_admin()
+            StorageService.ensure_bucket(bucket)
+            res = supabase.storage.from_(bucket).create_signed_upload_url(object_path)
+
+            signed_url = (
+                res.get("signedURL")
+                or res.get("signedUrl")
+                or res.get("signed_url")
+                or res.get("url")
+            )
+            token = res.get("token")
+
+            if not signed_url:
+                raise ValueError("No signed upload URL returned by Supabase Storage")
+
+            return {
+                "video_id": video_id,
+                "upload_url": signed_url,
+                "token": token,
+                "bucket": bucket,
+                "path": object_path,
+                "storage_path": storage_path,
+                "direct_upload": True
+            }
+        except Exception as e:
+            logger.error(f"Failed to create signed upload URL: {e}")
+            return {
+                "video_id": video_id,
+                "upload_url": None,
+                "token": None,
+                "bucket": None,
+                "path": None,
+                "storage_path": None,
+                "direct_upload": False
+            }
+
+    @staticmethod
     def upload_file(local_path: str, user_id: str, filename: str) -> str:
         """
         Stores media file in Supabase Storage or local storage based on MEDIA_STORAGE_TYPE.
@@ -22,6 +108,7 @@ class StorageService:
             content_type = content_type or "video/mp4"
 
             try:
+                StorageService.ensure_bucket(bucket)
                 supabase = get_supabase_admin()
                 with open(local_path, "rb") as f:
                     file_bytes = f.read()

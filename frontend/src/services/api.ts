@@ -46,13 +46,157 @@ apiClient.interceptors.request.use(async (config) => {
   return config;
 });
 
+export interface PresignedUploadUrlResponse {
+  video_id: string;
+  upload_url: string | null;
+  token: string | null;
+  bucket: string | null;
+  path: string | null;
+  storage_path: string | null;
+  direct_upload: boolean;
+}
+
+export interface CompleteUploadPayload {
+  video_id: string;
+  storage_path: string;
+  title: string;
+  original_filename: string;
+  file_size_bytes: number;
+}
+
 export const api = {
-  // Video Management
+  // Direct & Server Video Upload Management
+  async createUploadUrl(
+    filename: string,
+    fileSize: number,
+    contentType?: string,
+    title?: string
+  ): Promise<PresignedUploadUrlResponse> {
+    const res = await apiClient.post<PresignedUploadUrlResponse>('/api/videos/create-upload-url', {
+      filename,
+      file_size: fileSize,
+      content_type: contentType,
+      title,
+    });
+    return res.data;
+  },
+
+  async completeUpload(payload: CompleteUploadPayload): Promise<Video> {
+    const res = await apiClient.post<Video>('/api/videos/complete-upload', payload);
+    return res.data;
+  },
+
+  async uploadDirectToStorage(
+    uploadUrl: string,
+    bucket: string | null,
+    objectPath: string | null,
+    token: string | null,
+    file: File,
+    onProgress?: (percent: number) => void
+  ): Promise<void> {
+    // 1. Direct PUT with raw file (standard for S3/Supabase signed URLs)
+    try {
+      await axios.put(uploadUrl, file, {
+        headers: {
+          'Content-Type': file.type || 'video/mp4',
+        },
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total && onProgress) {
+            const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            onProgress(percent);
+          }
+        },
+      });
+      return;
+    } catch (putErr) {
+      console.warn('[Direct Upload] PUT attempt failed, trying multipart POST:', putErr);
+    }
+
+    // 2. Fallback: multipart FormData POST (Supabase Storage upload-to-sign format)
+    try {
+      const formData = new FormData();
+      formData.append('cacheControl', '3600');
+      formData.append('', file, file.name);
+
+      await axios.post(uploadUrl, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total && onProgress) {
+            const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            onProgress(percent);
+          }
+        },
+      });
+      return;
+    } catch (postErr) {
+      console.warn('[Direct Upload] FormData POST failed, trying supabase-js SDK fallback:', postErr);
+    }
+
+    // 3. Fallback: supabase-js SDK uploadToSignedUrl if bucket/token are present
+    if (bucket && objectPath && token) {
+      const { error } = await supabase.storage.from(bucket).uploadToSignedUrl(objectPath, token, file);
+      if (error) throw error;
+      if (onProgress) onProgress(100);
+      return;
+    }
+
+    throw new Error('All direct object storage upload methods failed.');
+  },
+
   async uploadVideo(
     file: File,
     title?: string,
     onProgress?: (percent: number) => void
   ): Promise<Video> {
+    const projectTitle = title?.trim() || file.name.replace(/\.[^/.]+$/, '');
+
+    // Attempt direct-to-storage upload first to bypass serverless payload limits (Vercel 4.5MB limit)
+    try {
+      const presigned = await this.createUploadUrl(
+        file.name,
+        file.size,
+        file.type || 'video/mp4',
+        projectTitle
+      );
+
+      if (presigned.direct_upload && presigned.upload_url && presigned.storage_path) {
+        await this.uploadDirectToStorage(
+          presigned.upload_url,
+          presigned.bucket,
+          presigned.path,
+          presigned.token,
+          file,
+          onProgress
+        );
+
+        const video = await this.completeUpload({
+          video_id: presigned.video_id,
+          storage_path: presigned.storage_path,
+          title: projectTitle,
+          original_filename: file.name,
+          file_size_bytes: file.size,
+        });
+
+        return video;
+      }
+    } catch (directErr: any) {
+      console.warn(
+        '[Direct Upload Notice] Direct storage upload bypassed or failed, falling back to server upload:',
+        directErr.message || directErr
+      );
+      // On Vercel production without a custom backend, files > 4.5MB cannot fall back to /api/videos/upload
+      if (file.size > 4.5 * 1024 * 1024 && !BACKEND_URL && import.meta.env.PROD) {
+        throw new Error(
+          `Direct object storage upload failed: ${directErr.message || 'Network error'}. ` +
+          `Vercel serverless functions strictly reject payloads exceeding 4.5MB. ` +
+          `Please check your Supabase Storage bucket ('media-vault') CORS and credentials, or upload a smaller clip.`
+        );
+      }
+    }
+
+    // Standard fallback: multipart/form-data upload to backend (local dev or small files)
     const formData = new FormData();
     formData.append('file', file);
     if (title) formData.append('title', title);

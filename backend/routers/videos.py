@@ -7,7 +7,16 @@ from fastapi.responses import FileResponse
 from config import settings, ensure_upload_dir
 from dependencies import get_current_user, get_optional_user
 from database import get_supabase_admin
-from models.schemas import VideoResponse, VideoDetailResponse, VideoCreateFromUrl, SummaryResponse, TranscriptResponse
+from models.schemas import (
+    VideoResponse,
+    VideoDetailResponse,
+    VideoCreateFromUrl,
+    SummaryResponse,
+    TranscriptResponse,
+    UploadUrlRequest,
+    UploadUrlResponse,
+    CompleteUploadRequest,
+)
 from services.youtube_downloader import YouTubeDownloader
 from services.pipeline import execute_video_pipeline
 from services.storage import StorageService
@@ -15,6 +24,103 @@ from services.storage import StorageService
 router = APIRouter(prefix="/api/videos", tags=["videos"])
 
 ALLOWED_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".mp3", ".wav", ".m4a"}
+
+@router.post("/create-upload-url", response_model=UploadUrlResponse)
+async def create_upload_url(
+    req: UploadUrlRequest,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Generates a short-lived signed upload URL for direct-to-object-storage upload,
+    bypassing serverless request-body limits (e.g. Vercel 4.5MB limit).
+    Validates file extension, size limit, and returns upload URL and token.
+    """
+    ext = os.path.splitext(req.filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file format '{ext}'. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"
+        )
+
+    max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    if req.file_size <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File size must be greater than 0 bytes."
+        )
+    if req.file_size > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File size exceeds maximum allowed limit of {settings.MAX_UPLOAD_SIZE_MB}MB."
+        )
+
+    video_id = str(uuid.uuid4())
+    user_id = user["id"]
+
+    res = StorageService.create_signed_upload_url(user_id=user_id, video_id=video_id, filename=req.filename)
+    return res
+
+
+@router.post("/complete-upload", response_model=VideoResponse)
+async def complete_upload(
+    req: CompleteUploadRequest,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Finalizes a direct-to-storage upload: verifies user ownership of storage path,
+    records video metadata in Supabase, and dispatches the background processing pipeline.
+    """
+    user_id = user["id"]
+    expected_prefix = f"supabase://{settings.STORAGE_BUCKET_NAME}/{user_id}/"
+
+    # Enforce strict user ownership and storage bucket isolation
+    if not req.storage_path.startswith(expected_prefix):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Storage path does not belong to authenticated user."
+        )
+
+    ext = os.path.splitext(req.original_filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file format '{ext}'. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"
+        )
+
+    max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    if req.file_size_bytes > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File size exceeds maximum limit of {settings.MAX_UPLOAD_SIZE_MB}MB."
+        )
+
+    supabase = get_supabase_admin()
+
+    # Idempotency check: if record already exists, return it
+    existing = supabase.table("videos").select("*").eq("id", req.video_id).execute()
+    if existing.data:
+        record = existing.data[0]
+        if record.get("user_id") != user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+        return record
+
+    insert_res = supabase.table("videos").insert({
+        "id": req.video_id,
+        "user_id": user_id,
+        "title": req.title.strip() or os.path.splitext(req.original_filename)[0],
+        "original_filename": req.original_filename,
+        "file_type": "upload",
+        "storage_path": req.storage_path,
+        "file_size_bytes": req.file_size_bytes,
+        "status": "pending",
+        "progress_percent": 0
+    }).execute()
+
+    record = insert_res.data[0]
+    background_tasks.add_task(execute_video_pipeline, req.video_id)
+    return record
+
 
 @router.post("/upload", response_model=VideoResponse)
 async def upload_video(
@@ -51,6 +157,16 @@ async def upload_video(
         raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {str(e)}")
 
     file_size = os.path.getsize(saved_filepath)
+    max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    if file_size > max_bytes:
+        try:
+            os.remove(saved_filepath)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File size exceeds maximum allowed limit of {settings.MAX_UPLOAD_SIZE_MB}MB."
+        )
 
     # Persist in storage (Supabase Storage if configured/serverless, else local disk)
     persistent_storage_path = StorageService.upload_file(saved_filepath, user_id, saved_filename)

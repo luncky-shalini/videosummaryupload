@@ -163,6 +163,8 @@ def test_youtube_downloader_configures_ffmpeg_location(tmp_path):
             pass
 
         def extract_info(self, url, download=True):
+            out_file = tmp_path / "test_id.mp4"
+            out_file.write_bytes(b"dummy_video_bytes")
             return {"id": "test_id", "title": "Test Video", "duration": 10.0}
 
         def prepare_filename(self, info):

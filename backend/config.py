@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     # YouTube import settings
     YOUTUBE_COOKIES_PATH: Optional[str] = None
     YOUTUBE_COOKIES_CONTENT: Optional[str] = None
+    YOUTUBE_PO_TOKEN: Optional[str] = None
+    YOUTUBE_VISITOR_DATA: Optional[str] = None
+    YOUTUBE_POT_PROVIDER_URL: Optional[str] = None
+    YOUTUBE_JS_RUNTIME_PATH: Optional[str] = None
     YOUTUBE_PROXY: Optional[str] = None
 
     @property

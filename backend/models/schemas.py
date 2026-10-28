@@ -6,6 +6,28 @@ class VideoCreateFromUrl(BaseModel):
     url: str
     title: Optional[str] = None
 
+class UploadUrlRequest(BaseModel):
+    filename: str
+    file_size: int
+    content_type: Optional[str] = None
+    title: Optional[str] = None
+
+class UploadUrlResponse(BaseModel):
+    video_id: str
+    upload_url: Optional[str] = None
+    token: Optional[str] = None
+    bucket: Optional[str] = None
+    path: Optional[str] = None
+    storage_path: Optional[str] = None
+    direct_upload: bool = False
+
+class CompleteUploadRequest(BaseModel):
+    video_id: str
+    storage_path: str
+    title: str
+    original_filename: str
+    file_size_bytes: int
+
 class VideoResponse(BaseModel):
     id: str
     user_id: Optional[str] = None

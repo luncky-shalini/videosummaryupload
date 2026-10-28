@@ -311,7 +311,11 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
           {isUploading ? (
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '0.25rem' }}>
-                <span>Uploading media to secure backend...</span>
+                <span>
+                  {uploadProgress === 100
+                    ? 'Upload complete! Initializing AI transcription & synopsis...'
+                    : `Uploading media directly to secure cloud storage...`}
+                </span>
                 <span>{uploadProgress}%</span>
               </div>
               <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
@@ -352,6 +356,42 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>
               Enter a public YouTube URL or direct video stream link to extract and transcribe.
             </p>
+
+            {error && (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.5rem',
+                  padding: '0.85rem',
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  borderRadius: 'var(--radius-md)',
+                  color: '#fca5a5',
+                  fontSize: '0.85rem',
+                  lineHeight: 1.4,
+                  marginBottom: '1rem',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                  <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <span>{error}</span>
+                </div>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ alignSelf: 'flex-start', fontSize: '0.8rem', padding: '0.35rem 0.75rem', marginTop: '0.25rem' }}
+                  onClick={() => {
+                    setShowUrlModal(false);
+                    setError(null);
+                    fileInputRef.current?.click();
+                  }}
+                >
+                  <UploadCloud size={14} style={{ marginRight: '4px' }} />
+                  Upload Video File Directly Instead
+                </button>
+              </div>
+            )}
 
             <form onSubmit={handleUrlSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
