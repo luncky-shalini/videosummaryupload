@@ -173,6 +173,22 @@ def test_youtube_downloader_configures_ffmpeg_location(tmp_path):
 
     assert "ffmpeg_location" in captured_opts
     assert os.path.exists(captured_opts["ffmpeg_location"]) or os.path.isdir(captured_opts["ffmpeg_location"])
+    assert "extractor_args" in captured_opts
+    assert "youtube" in captured_opts["extractor_args"]
+    assert "player_client" in captured_opts["extractor_args"]["youtube"]
+
+
+def test_youtube_downloader_cookie_resolution(tmp_path):
+    """Verifies that YouTubeDownloader supports inline cookies via YOUTUBE_COOKIES_CONTENT."""
+    from config import settings
+    mock_cookie_content = "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t1793214452\tSID\tdummy_val\n"
+    
+    with patch.object(settings, "YOUTUBE_COOKIES_CONTENT", mock_cookie_content):
+        cookiefile = YouTubeDownloader._resolve_cookiefile()
+        assert cookiefile is not None
+        assert os.path.exists(cookiefile)
+        with open(cookiefile, "r", encoding="utf-8") as f:
+            assert "dummy_val" in f.read()
 
 
 def test_requirements_contains_imageio_ffmpeg():

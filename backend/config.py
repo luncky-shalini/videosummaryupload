@@ -1,5 +1,5 @@
 import os
-from typing import List
+from typing import List, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 def is_serverless() -> bool:
@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     STORAGE_BUCKET_NAME: str = "media-vault"
     UPLOAD_DIR: str = get_default_upload_dir()
     MAX_UPLOAD_SIZE_MB: int = 500
+
+    # YouTube import settings
+    YOUTUBE_COOKIES_PATH: Optional[str] = None
+    YOUTUBE_COOKIES_CONTENT: Optional[str] = None
+    YOUTUBE_PROXY: Optional[str] = None
 
     @property
     def cors_origins_list(self) -> List[str]:
