@@ -4,7 +4,7 @@
   "rewrites": [
     {
       "source": "/(.*)",
-      "destination": "main.py"
+      "destination": "/api/index.py"
     }
   ]
 }

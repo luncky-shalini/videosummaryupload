@@ -1,4 +1,5 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from routers import auth, videos, process, transcript, export, chat
@@ -6,8 +7,31 @@ from routers import auth, videos, process, transcript, export, chat
 app = FastAPI(
     title="AI Video Synopsis & Meeting Transcription Platform API",
     description="Production-grade API for speech recognition, diarization, and LLM-powered meeting intelligence.",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url="/docs",
+    openapi_url="/openapi.json"
 )
+
+# Vercel Serverless Path Normalizer Middleware
+# Ensures requests rewritten to /api/index.py or /main.py resolve to their intended route path
+@app.middleware("http")
+async def normalize_vercel_paths(request: Request, call_next):
+    # 1. Check if x-matched-path header is present from Vercel edge proxy
+    matched = request.headers.get("x-matched-path")
+    if matched and matched not in ("/main.py", "/api/index.py", "/api/index", "/index.py"):
+        request.scope["path"] = matched
+    else:
+        # 2. Strip any serverless file prefixes injected into ASGI scope path
+        path = request.scope.get("path", "")
+        for prefix in ["/main.py", "/api/index.py", "/api/index", "/index.py"]:
+            if path == prefix:
+                request.scope["path"] = "/"
+                break
+            elif path.startswith(prefix + "/"):
+                request.scope["path"] = path[len(prefix):]
+                break
+
+    return await call_next(request)
 
 # CORS configuration
 origins = settings.cors_origins_list
@@ -32,6 +56,7 @@ app.include_router(export.router)
 app.include_router(chat.router)
 
 @app.get("/")
+@app.get("/api")
 def read_root():
     return {
         "status": "online",
@@ -40,12 +65,20 @@ def read_root():
     }
 
 @app.get("/health")
+@app.get("/api/health")
 def healthcheck():
     return {
         "status": "healthy",
         "groq_configured": bool(settings.GROQ_API_KEY),
         "supabase_configured": bool(settings.SUPABASE_URL and settings.SUPABASE_ANON_KEY)
     }
+
+@app.get("/api/docs", include_in_schema=False)
+def api_docs_redirect():
+    return RedirectResponse(url="/docs")
+
+# Expose both app and handler for Vercel Python runtime
+handler = app
 
 if __name__ == "__main__":
     import uvicorn
