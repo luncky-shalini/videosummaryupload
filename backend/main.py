@@ -16,20 +16,31 @@ app = FastAPI(
 # Ensures requests rewritten to /api/index.py or /main.py resolve to their intended route path
 @app.middleware("http")
 async def normalize_vercel_paths(request: Request, call_next):
-    # 1. Check if x-matched-path header is present from Vercel edge proxy
-    matched = request.headers.get("x-matched-path")
-    if matched and matched not in ("/main.py", "/api/index.py", "/api/index", "/index.py"):
-        request.scope["path"] = matched
+    # 1. Check if path was forwarded via Vercel rewrite parameter (?path=:path*)
+    path_param = request.query_params.get("path")
+    if path_param is not None:
+        clean_path = "/" + path_param.lstrip("/") if path_param else "/"
+        request.scope["path"] = clean_path
+
+        # Clean query string so endpoint query parameters are not polluted
+        raw_qs = request.scope.get("query_string", b"").decode("utf-8")
+        filtered = [p for p in raw_qs.split("&") if p and not p.startswith("path=")]
+        request.scope["query_string"] = "&".join(filtered).encode("utf-8")
     else:
-        # 2. Strip any serverless file prefixes injected into ASGI scope path
-        path = request.scope.get("path", "")
-        for prefix in ["/main.py", "/api/index.py", "/api/index", "/index.py"]:
-            if path == prefix:
-                request.scope["path"] = "/"
-                break
-            elif path.startswith(prefix + "/"):
-                request.scope["path"] = path[len(prefix):]
-                break
+        # 2. Check if x-matched-path header is present from Vercel edge proxy
+        matched = request.headers.get("x-matched-path")
+        if matched and matched not in ("/main.py", "/api/index.py", "/api/index", "/index.py"):
+            request.scope["path"] = matched
+        else:
+            # 3. Strip any serverless file prefixes injected into ASGI scope path
+            path = request.scope.get("path", "")
+            for prefix in ["/main.py", "/api/index.py", "/api/index", "/index.py"]:
+                if path == prefix:
+                    request.scope["path"] = "/"
+                    break
+                elif path.startswith(prefix + "/"):
+                    request.scope["path"] = path[len(prefix):]
+                    break
 
     return await call_next(request)
 

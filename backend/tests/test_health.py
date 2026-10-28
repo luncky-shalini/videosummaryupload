@@ -59,3 +59,17 @@ def test_vercel_rewrite_with_path_prefix_injection():
     resp_main = client.get("/main.py/health")
     assert resp_main.status_code == 200
     assert resp_main.json()["status"] == "healthy"
+
+def test_vercel_rewrite_with_path_query_param():
+    # Simulates Vercel rewrite /:path* -> /api/index.py?path=:path*
+    resp = client.get("/api/index.py?path=health")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "healthy"
+
+    docs_resp = client.get("/api/index.py?path=docs")
+    assert docs_resp.status_code == 200
+
+    root_resp = client.get("/api/index.py?path=")
+    assert root_resp.status_code == 200
+    assert root_resp.json()["status"] == "online"
+
