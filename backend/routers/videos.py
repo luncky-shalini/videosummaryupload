@@ -4,12 +4,13 @@ import uuid
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, status
 from fastapi.responses import FileResponse
-from config import settings
+from config import settings, ensure_upload_dir
 from dependencies import get_current_user, get_optional_user
 from database import get_supabase_admin
 from models.schemas import VideoResponse, VideoDetailResponse, VideoCreateFromUrl, SummaryResponse, TranscriptResponse
 from services.youtube_downloader import YouTubeDownloader
 from services.pipeline import execute_video_pipeline
+from services.storage import StorageService
 
 router = APIRouter(prefix="/api/videos", tags=["videos"])
 
@@ -37,9 +38,8 @@ async def upload_video(
     video_id = str(uuid.uuid4())
     video_title = title.strip() if title and title.strip() else os.path.splitext(file.filename)[0]
 
-    # Local user directory
-    user_upload_dir = os.path.join(settings.UPLOAD_DIR, user_id)
-    os.makedirs(user_upload_dir, exist_ok=True)
+    # Local user directory (ensures /tmp/uploads on serverless)
+    user_upload_dir = ensure_upload_dir(os.path.join(settings.UPLOAD_DIR, user_id))
     saved_filename = f"{video_id}_{file.filename}"
     saved_filepath = os.path.join(user_upload_dir, saved_filename)
 
@@ -52,6 +52,9 @@ async def upload_video(
 
     file_size = os.path.getsize(saved_filepath)
 
+    # Persist in storage (Supabase Storage if configured/serverless, else local disk)
+    persistent_storage_path = StorageService.upload_file(saved_filepath, user_id, saved_filename)
+
     # Persist in Supabase
     supabase = get_supabase_admin()
     insert_res = supabase.table("videos").insert({
@@ -60,7 +63,7 @@ async def upload_video(
         "title": video_title,
         "original_filename": file.filename,
         "file_type": "upload",
-        "storage_path": saved_filepath,
+        "storage_path": persistent_storage_path,
         "file_size_bytes": file_size,
         "status": "pending",
         "progress_percent": 0
@@ -85,7 +88,7 @@ async def import_video_url(
     """
     user_id = user["id"]
     video_id = str(uuid.uuid4())
-    user_upload_dir = os.path.join(settings.UPLOAD_DIR, user_id)
+    user_upload_dir = ensure_upload_dir(os.path.join(settings.UPLOAD_DIR, user_id))
 
     try:
         download_meta = YouTubeDownloader.extract_and_download(data.url, user_upload_dir)
@@ -99,6 +102,9 @@ async def import_video_url(
     title = data.title if data.title else download_meta.get("title", "Imported Video")
     file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
 
+    # Persist in storage (Supabase Storage if configured/serverless, else local disk)
+    persistent_storage_path = StorageService.upload_file(filepath, user_id, os.path.basename(filepath))
+
     supabase = get_supabase_admin()
     insert_res = supabase.table("videos").insert({
         "id": video_id,
@@ -106,7 +112,7 @@ async def import_video_url(
         "title": title,
         "original_filename": os.path.basename(filepath),
         "file_type": "youtube",
-        "storage_path": filepath,
+        "storage_path": persistent_storage_path,
         "source_url": data.url,
         "duration_seconds": download_meta.get("duration", 0),
         "file_size_bytes": file_size,
@@ -183,29 +189,16 @@ async def stream_video_file(
     if video.get("user_id") and video["user_id"] != user["id"]:
         raise HTTPException(status_code=403, detail="Forbidden: You do not own this video")
 
-    filepath = video.get("storage_path")
-    if not filepath or not os.path.exists(filepath):
-        raise HTTPException(status_code=404, detail="Media file not found on server")
-
-    import mimetypes
-    media_type, _ = mimetypes.guess_type(filepath)
-    if not media_type:
-        media_type = "video/mp4" if filepath.endswith((".mp4", ".m4v")) else "application/octet-stream"
-
-    return FileResponse(
-        filepath,
-        media_type=media_type,
-        headers={
-            "Accept-Ranges": "bytes",
-            "Content-Disposition": f'inline; filename="{os.path.basename(filepath)}"'
-        }
-    )
+    try:
+        return StorageService.get_stream_response(video, user["id"])
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Media file not found on server or storage")
 
 
 @router.delete("/{video_id}")
 async def delete_video(video_id: str, user: dict = Depends(get_current_user)):
     """
-    Deletes the video, related transcripts, summaries, and local file storage.
+    Deletes the video, related transcripts, summaries, and local/cloud storage.
     """
     supabase = get_supabase_admin()
     v_res = supabase.table("videos").select("*").eq("id", video_id).single().execute()
@@ -215,13 +208,10 @@ async def delete_video(video_id: str, user: dict = Depends(get_current_user)):
     if video["user_id"] != user["id"]:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    # Delete local file
+    # Delete local or Supabase Storage file
     filepath = video.get("storage_path")
-    if filepath and os.path.exists(filepath):
-        try:
-            os.remove(filepath)
-        except Exception:
-            pass
+    if filepath:
+        StorageService.delete_file(filepath)
 
     # Delete DB records (Cascading deletes handles transcripts, segments, summaries)
     supabase.table("videos").delete().eq("id", video_id).execute()

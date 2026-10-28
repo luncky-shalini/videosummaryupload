@@ -194,7 +194,15 @@ async def translate_subtitles(
     # If transcript segments are not found in DB, attempt audio transcription fallback
     if not original_segments:
         import os
-        video_path = video.get("storage_path")
+        from services.storage import StorageService
+        raw_storage_path = video.get("storage_path")
+        video_path = None
+        if raw_storage_path:
+            try:
+                video_path = StorageService.ensure_local_file(raw_storage_path, video.get("user_id"))
+            except Exception:
+                video_path = raw_storage_path if os.path.exists(raw_storage_path) else None
+
         if video_path and os.path.exists(video_path):
             try:
                 from services.media_processor import MediaProcessor

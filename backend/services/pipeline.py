@@ -33,9 +33,13 @@ def execute_video_pipeline(video_id: str):
             "progress_percent": 15
         }).eq("id", video_id).execute()
 
-        video_path = video.get("storage_path")
-        if not video_path or not os.path.exists(video_path):
-            raise FileNotFoundError(f"Media file not found at {video_path}")
+        # Ensure video media is available locally on disk (downloads from Supabase Storage if needed)
+        from services.storage import StorageService
+        raw_storage_path = video.get("storage_path")
+        try:
+            video_path = StorageService.ensure_local_file(raw_storage_path, video.get("user_id"))
+        except Exception as e:
+            raise FileNotFoundError(f"Media file not found at {raw_storage_path}: {e}")
 
         # Metadata extraction
         meta = MediaProcessor.get_media_metadata(video_path)
