@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     YOUTUBE_JS_RUNTIME_PATH: Optional[str] = None
     YOUTUBE_PROXY: Optional[str] = None
 
+    # Configurable external downloader worker settings
+    YOUTUBE_WORKER_URL: Optional[str] = None
+    YOUTUBE_WORKER_SECRET: Optional[str] = None
+
     @property
     def cors_origins_list(self) -> List[str]:
         origins = [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]

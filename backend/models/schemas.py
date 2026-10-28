@@ -28,6 +28,28 @@ class CompleteUploadRequest(BaseModel):
     original_filename: str
     file_size_bytes: int
 
+class WorkerDownloadRequest(BaseModel):
+    url: str
+    user_id: str
+    title: Optional[str] = None
+
+class WorkerDownloadResponse(BaseModel):
+    status: str = "success"
+    title: str
+    duration: float
+    storage_path: str
+    file_size_bytes: int
+    thumbnail: Optional[str] = None
+    uploader: Optional[str] = None
+    description: Optional[str] = ""
+
+class WorkerHealthResponse(BaseModel):
+    status: str
+    yt_dlp_version: str
+    ffmpeg_available: bool
+    js_runtime: Optional[str] = None
+    pot_provider_configured: bool = False
+
 class VideoResponse(BaseModel):
     id: str
     user_id: Optional[str] = None

@@ -1,0 +1,35 @@
+# Docker Compose stack for persistent YouTube Downloader Worker + PO Token Provider
+# Deploy on VPS, Railway, Render, Fly.io, or AWS EC2 to handle YouTube BotGuard challenges
+version: "3.8"
+
+services:
+  # 1. Official bgutil PO Token Provider service (generates BotGuard tokens)
+  bgutil-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    container_name: bgutil-pot-provider
+    restart: unless-stopped
+    init: true
+    ports:
+      - "4416:4416"
+    environment:
+      - PORT=4416
+
+  # 2. Authenticated Downloader Worker Service (runs yt-dlp with PO Token provider)
+  youtube-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: youtube-downloader-worker
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    depends_on:
+      - bgutil-provider
+    environment:
+      - PORT=8000
+      - YOUTUBE_WORKER_SECRET=replace_with_your_secure_worker_secret
+      - YOUTUBE_POT_PROVIDER_URL=http://bgutil-provider:4416
+      - SUPABASE_URL=https://your-project.supabase.co
+      - SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+      - MEDIA_STORAGE_TYPE=supabase
+      - STORAGE_BUCKET_NAME=media-vault

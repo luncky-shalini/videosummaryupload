@@ -207,26 +207,38 @@ async def import_video_url(
     user_upload_dir = ensure_upload_dir(os.path.join(settings.UPLOAD_DIR, user_id))
 
     try:
-        download_meta = YouTubeDownloader.extract_and_download(data.url, user_upload_dir)
+        download_meta = YouTubeDownloader.extract_and_download(
+            data.url,
+            user_upload_dir,
+            user_id=user_id,
+            title=data.title
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to import URL with yt-dlp: {str(e)}"
         )
 
-    filepath = download_meta["filepath"]
-    title = data.title if data.title else download_meta.get("title", "Imported Video")
-    file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+    title = data.title if data.title and data.title.strip() else download_meta.get("title", "Imported Video")
 
-    # Persist in storage (Supabase Storage if configured/serverless, else local disk)
-    persistent_storage_path = StorageService.upload_file(filepath, user_id, os.path.basename(filepath))
+    # If downloaded via worker, storage_path is already uploaded to Supabase Storage
+    if download_meta.get("storage_path"):
+        persistent_storage_path = download_meta["storage_path"]
+        file_size = download_meta.get("file_size_bytes") or 0
+        original_filename = os.path.basename(persistent_storage_path)
+    else:
+        filepath = download_meta["filepath"]
+        file_size = os.path.getsize(filepath) if filepath and os.path.exists(filepath) else 0
+        original_filename = os.path.basename(filepath) if filepath else "video.mp4"
+        # Persist in storage (Supabase Storage if configured/serverless, else local disk)
+        persistent_storage_path = StorageService.upload_file(filepath, user_id, original_filename)
 
     supabase = get_supabase_admin()
     insert_res = supabase.table("videos").insert({
         "id": video_id,
         "user_id": user_id,
         "title": title,
-        "original_filename": os.path.basename(filepath),
+        "original_filename": original_filename,
         "file_type": "youtube",
         "storage_path": persistent_storage_path,
         "source_url": data.url,

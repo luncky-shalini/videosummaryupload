@@ -109,6 +109,12 @@ class YouTubeDownloader:
             }
         }
 
+        # Configure official bgutil PO Token provider plugin if provider URL is configured
+        if settings.YOUTUBE_POT_PROVIDER_URL and settings.YOUTUBE_POT_PROVIDER_URL.strip():
+            opts['extractor_args']['youtubepot-bgutilhttp'] = {
+                'base_url': [settings.YOUTUBE_POT_PROVIDER_URL.strip()]
+            }
+
         # Configure JS challenge solver if runtime is discovered
         js_runtimes = YouTubeDownloader._resolve_js_runtime()
         if js_runtimes:
@@ -128,9 +134,73 @@ class YouTubeDownloader:
         return opts
 
     @staticmethod
-    def extract_and_download(url: str, output_dir: str) -> Dict[str, Any]:
+    def download_via_worker(url: str, user_id: str, title: Optional[str] = None) -> Dict[str, Any]:
         """
-        Download a YouTube video with client fallback and reliable file resolution.
+        Delegates YouTube download to an external persistent worker service
+        capable of solving PO Token challenges or hosting bgutil-provider.
+        """
+        import httpx
+
+        worker_url = settings.YOUTUBE_WORKER_URL.rstrip("/")
+        headers = {}
+        if settings.YOUTUBE_WORKER_SECRET and settings.YOUTUBE_WORKER_SECRET.strip():
+            secret = settings.YOUTUBE_WORKER_SECRET.strip()
+            headers["X-Worker-Key"] = secret
+            headers["Authorization"] = f"Bearer {secret}"
+
+        endpoint = f"{worker_url}/api/worker/download"
+        payload = {
+            "url": url,
+            "user_id": user_id,
+            "title": title
+        }
+
+        logger.info(f"Delegating YouTube import for {url} to external worker: {worker_url}")
+
+        try:
+            with httpx.Client(timeout=180.0) as client:
+                res = client.post(endpoint, json=payload, headers=headers)
+        except httpx.TimeoutException:
+            raise RuntimeError(
+                f"External YouTube worker at {worker_url} timed out processing {url}. "
+                "The video may be too large or the worker is overloaded. Try uploading the video file directly."
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to connect to external YouTube worker at {worker_url}: {str(e)}. "
+                "Please verify that the worker service is running and accessible."
+            )
+
+        if res.status_code in (401, 403):
+            raise RuntimeError(
+                "External YouTube worker authentication failed. "
+                "Please verify that YOUTUBE_WORKER_SECRET matches on both the backend and worker."
+            )
+
+        if res.status_code != 200:
+            error_detail = "Unknown error"
+            try:
+                error_detail = res.json().get("detail", res.text)
+            except Exception:
+                error_detail = res.text
+            raise RuntimeError(f"External YouTube worker failed: {error_detail}")
+
+        data = res.json()
+        return {
+            "title": data.get("title", "Imported Video"),
+            "duration": float(data.get("duration", 0.0)),
+            "filepath": None,
+            "storage_path": data.get("storage_path"),
+            "file_size_bytes": data.get("file_size_bytes", 0),
+            "thumbnail": data.get("thumbnail"),
+            "uploader": data.get("uploader", "Unknown"),
+            "description": data.get("description", ""),
+        }
+
+    @staticmethod
+    def _extract_and_download_in_process(url: str, output_dir: str) -> Dict[str, Any]:
+        """
+        Executes local in-process yt-dlp download across configured client profiles.
         """
         os.makedirs(output_dir, exist_ok=True)
 
@@ -195,9 +265,11 @@ class YouTubeDownloader:
             ):
                 raise RuntimeError(
                     "YouTube requires additional verification (bot detection) for this video from the server's network. "
-                    "The configured downloader clients could not access this video. "
-                    "You can upload the video file directly (drag & drop above), or configure "
-                    "YOUTUBE_COOKIES_CONTENT or YOUTUBE_PO_TOKEN in your deployment settings."
+                    "The current serverless deployment cannot solve this challenge without an external worker or session credentials. "
+                    "You can: "
+                    "1. Upload the video file directly (drag & drop above) — video upload works globally. "
+                    "2. Configure an external downloader worker via YOUTUBE_WORKER_URL and YOUTUBE_WORKER_SECRET. "
+                    "3. Configure YOUTUBE_COOKIES_CONTENT in your deployment environment variables."
                 ) from last_error
 
             if "403" in lower_error or "forbidden" in lower_error:
@@ -260,3 +332,20 @@ class YouTubeDownloader:
             "uploader": info.get("uploader", "Unknown"),
             "description": info.get("description", ""),
         }
+
+    @staticmethod
+    def extract_and_download(
+        url: str,
+        output_dir: str,
+        user_id: Optional[str] = None,
+        title: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Download a YouTube video. If an external worker is configured (e.g. for Vercel production),
+        delegates to the worker service to handle PO token generation and datacenter IP bypass.
+        Otherwise executes local in-process download.
+        """
+        if settings.YOUTUBE_WORKER_URL and settings.YOUTUBE_WORKER_URL.strip():
+            return YouTubeDownloader.download_via_worker(url, user_id=user_id or "shared", title=title)
+
+        return YouTubeDownloader._extract_and_download_in_process(url, output_dir)

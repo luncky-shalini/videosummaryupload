@@ -3,7 +3,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings
-from routers import auth, videos, process, transcript, export, chat
+from routers import auth, videos, process, transcript, export, chat, worker
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,7 @@ app.include_router(process.router)
 app.include_router(transcript.router)
 app.include_router(export.router)
 app.include_router(chat.router)
+app.include_router(worker.router)
 
 @app.get("/")
 @app.get("/api")
