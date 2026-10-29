@@ -338,3 +338,43 @@ def test_worker_endpoints_health_and_auth():
                     assert resp_data["status"] == "success"
                     assert resp_data["storage_path"] == "supabase://media-vault/usr-1/test.mp4"
                     assert resp_data["title"] == "Custom Title"
+
+
+def test_youtube_downloader_resolve_cookies_plain():
+    """Verifies that plain multiline cookie text is correctly written to tmp cookiefile."""
+    cookie_sample = "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t2147483647\tSID\tsample_session_id"
+    with patch.object(settings, "YOUTUBE_COOKIES_CONTENT", cookie_sample):
+        cookie_path = YouTubeDownloader._resolve_cookiefile()
+        assert cookie_path is not None
+        assert os.path.exists(cookie_path)
+        with open(cookie_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        assert "SID" in content
+        assert "sample_session_id" in content
+
+
+def test_youtube_downloader_resolve_cookies_escaped_newlines():
+    """Verifies that escaped \\n strings from cloud dashboard env inputs are resolved."""
+    cookie_sample = "# Netscape HTTP Cookie File\\n.youtube.com\\tTRUE\\t/\\tTRUE\\t2147483647\\tHSID\\tsample_hsid"
+    with patch.object(settings, "YOUTUBE_COOKIES_CONTENT", cookie_sample):
+        cookie_path = YouTubeDownloader._resolve_cookiefile()
+        assert cookie_path is not None
+        with open(cookie_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        assert len(lines) >= 2
+
+
+def test_youtube_downloader_resolve_cookies_base64():
+    """Verifies that base64 encoded cookies are decoded before being written."""
+    import base64
+    raw_cookie = "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t2147483647\tSSID\tsample_ssid"
+    b64_cookie = "base64:" + base64.b64encode(raw_cookie.encode("utf-8")).decode("utf-8")
+
+    with patch.object(settings, "YOUTUBE_COOKIES_CONTENT", b64_cookie):
+        cookie_path = YouTubeDownloader._resolve_cookiefile()
+        assert cookie_path is not None
+        with open(cookie_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        assert "SSID" in content
+        assert "sample_ssid" in content
+

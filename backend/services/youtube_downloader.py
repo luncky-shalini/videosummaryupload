@@ -25,10 +25,33 @@ class YouTubeDownloader:
 
         # 2. Inline cookie content passed via environment variable (ideal for Vercel secrets)
         if settings.YOUTUBE_COOKIES_CONTENT and settings.YOUTUBE_COOKIES_CONTENT.strip():
+            raw_content = settings.YOUTUBE_COOKIES_CONTENT.strip()
+            content = raw_content
+
+            # Auto-decode base64 if prefixed or detected (useful for multi-line env var pasting)
+            if content.startswith("base64:"):
+                import base64
+                try:
+                    content = base64.b64decode(content[7:].strip()).decode("utf-8")
+                except Exception as e:
+                    logger.warning(f"Failed to decode base64: prefix YouTube cookies: {e}")
+            elif not ("\t" in content or " " in content):
+                import base64
+                try:
+                    decoded = base64.b64decode(content).decode("utf-8")
+                    if "# Netscape" in decoded or "\t" in decoded:
+                        content = decoded
+                except Exception:
+                    pass
+
+            # Handle literal escaped newlines common when pasting into cloud environment forms
+            if "\\n" in content and "\n" not in content:
+                content = content.replace("\\n", "\n")
+
             tmp_cookie_path = os.path.join(tempfile.gettempdir(), "yt_cookies.txt")
             try:
                 with open(tmp_cookie_path, "w", encoding="utf-8") as f:
-                    f.write(settings.YOUTUBE_COOKIES_CONTENT.strip())
+                    f.write(content.strip() + "\n")
                 return tmp_cookie_path
             except Exception as e:
                 logger.warning(f"Failed to write inline YouTube cookies: {e}")
