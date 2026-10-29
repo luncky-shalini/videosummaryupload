@@ -97,7 +97,7 @@ class YouTubeDownloader:
 
         opts = {
             # Format selection: prefer 720p MP4 or high quality audio with fallback to best single stream
-            'format': 'bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]/best[height<=720]/bestaudio[ext=m4a]/bestaudio/best',
+            'format': 'bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]/bestvideo[height<=720]+bestaudio/best[height<=720]/bestaudio[ext=m4a]/bestaudio/best',
             'outtmpl': outtmpl,
             'quiet': True,
             'no_warnings': True,
@@ -114,6 +114,9 @@ class YouTubeDownloader:
             opts['extractor_args']['youtubepot-bgutilhttp'] = {
                 'base_url': [settings.YOUTUBE_POT_PROVIDER_URL.strip()]
             }
+        else:
+            # Disable plugins when no POT provider URL is set to avoid the socket timeout on http://127.0.0.1:4416/ping
+            opts['no_plugins'] = True
 
         # Configure JS challenge solver if runtime is discovered
         js_runtimes = YouTubeDownloader._resolve_js_runtime()
@@ -205,9 +208,9 @@ class YouTubeDownloader:
         os.makedirs(output_dir, exist_ok=True)
 
         client_profiles = [
-            ['web_creator', 'mweb', 'android', 'ios'],
             ['android', 'ios'],
-            ['tv', 'tv_embedded'],
+            ['tv'],
+            ['web_creator', 'mweb', 'android', 'ios'],
             ['web', 'default'],
         ]
 
@@ -240,6 +243,9 @@ class YouTubeDownloader:
                     or "403" in error_text
                     or "po token" in error_text
                     or "botguard" in error_text
+                    or "no video formats found" in error_text
+                    or "sabr" in error_text
+                    or "requested format is not available" in error_text
                 )
 
                 if attempt == len(client_profiles) or not is_access_error:
